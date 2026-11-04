@@ -1,0 +1,38 @@
+{
+  "name": "@medstock/api",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "nest start --watch",
+    "build": "nest build",
+    "start": "node dist/main.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint \"src/**/*.ts\"",
+    "test": "NODE_OPTIONS='--experimental-vm-modules' jest --config jest.config.cjs --runInBand"
+  },
+  "dependencies": {
+    "@medstock/database": "workspace:*",
+    "aws-jwt-verify": "5.2.1",
+    "exceljs": "4.4.0",
+    "@medstock/shared-types": "workspace:*",
+    "@nestjs/common": "12.3.3",
+    "@nestjs/core": "12.3.3",
+    "@nestjs/platform-express": "12.3.3",
+    "reflect-metadata": "0.2.2",
+    "rxjs": "7.8.2",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@nestjs/cli": "12.0.11",
+    "@nestjs/testing": "12.3.3",
+    "eslint": "9.39.1",
+    "@types/jest": "30.0.0",
+    "@types/node": "26.6.6",
+    "@types/supertest": "7.2.1",
+    "jest": "30.5.2",
+    "supertest": "7.1.4",
+    "ts-jest": "29.4.15",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.72.1"
+  }
+}

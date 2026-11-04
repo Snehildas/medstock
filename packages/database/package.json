@@ -1,0 +1,33 @@
+{
+  "name": "@medstock/database",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Prisma schema, migrations, and client for MedStock.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": ["dist", "prisma"],
+  "scripts": {
+    "generate": "prisma generate",
+    "build": "prisma generate && tsc -p tsconfig.build.json",
+    "typecheck": "prisma generate && tsc -p tsconfig.json --noEmit",
+    "lint": "eslint src --ignore-pattern src/generated/**",
+    "validate": "prisma validate",
+    "test": "prisma migrate deploy && NODE_OPTIONS='--experimental-vm-modules' jest --config jest.config.cjs --runInBand"
+  },
+  "dependencies": {
+    "@prisma/adapter-pg": "7.10.1",
+    "@prisma/client": "7.10.1",
+    "pg": "8.23.1"
+  },
+  "devDependencies": {
+    "@types/jest": "30.0.0",
+    "@types/node": "26.6.6",
+    "@types/pg": "8.23.1",
+    "eslint": "9.39.1",
+    "jest": "30.5.2",
+    "prisma": "7.10.1",
+    "ts-jest": "29.4.15",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.72.1"
+  }
+}

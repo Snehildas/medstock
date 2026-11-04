@@ -1,0 +1,517 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserStatus {
+  INVITED
+  ACTIVE
+  DISABLED
+}
+
+enum OrganizationType {
+  PLATFORM
+  RETAILER
+  DISTRIBUTOR
+}
+
+enum OrganizationStatus {
+  PENDING_VERIFICATION
+  ACTIVE
+  SUSPENDED
+}
+
+enum MembershipRole {
+  PLATFORM_ADMIN
+  RETAILER_OWNER
+  RETAILER_STAFF
+  DISTRIBUTOR_OWNER
+  DISTRIBUTOR_STAFF
+}
+
+enum MembershipStatus {
+  INVITED
+  ACTIVE
+  SUSPENDED
+}
+
+enum IdentityProvider {
+  COGNITO
+}
+
+model User {
+  id        String     @id @default(uuid()) @db.Uuid
+  email     String     @unique
+  name      String?
+  status    UserStatus @default(INVITED)
+  createdAt DateTime   @default(now()) @map("created_at")
+  updatedAt DateTime   @updatedAt @map("updated_at")
+
+  memberships      OrganizationMembership[]
+  identityAccounts  IdentityAccount[]
+  catalogAuditEvents CatalogAuditEvent[]
+  listingAuditEvents ListingAuditEvent[]
+  enquiriesCreated    ProcurementEnquiry[]      @relation("EnquiryCreator")
+  enquiriesResponded  ProcurementEnquiry[]      @relation("EnquiryResponder")
+  enquiryAuditEvents  ProcurementEnquiryAuditEvent[]
+  listingImportAudits ListingImportAuditEvent[]
+  listingImportsUploaded ListingImport[] @relation("ListingImportUploader")
+
+  @@map("users")
+}
+
+model Organization {
+  id        String             @id @default(uuid()) @db.Uuid
+  name      String
+  slug      String             @unique
+  type      OrganizationType
+  status    OrganizationStatus @default(PENDING_VERIFICATION)
+  createdAt DateTime           @default(now()) @map("created_at")
+  updatedAt DateTime           @updatedAt @map("updated_at")
+
+  memberships OrganizationMembership[]
+  listings     DistributorListing[]
+  listingAudits ListingAuditEvent[]
+  enquiriesAsRetailer        ProcurementEnquiry[]           @relation("EnquiryRetailer")
+  enquiriesAsDistributor     ProcurementEnquiry[]           @relation("EnquiryDistributor")
+  enquiryAuditsAsRetailer    ProcurementEnquiryAuditEvent[] @relation("EnquiryAuditRetailer")
+  enquiryAuditsAsDistributor ProcurementEnquiryAuditEvent[] @relation("EnquiryAuditDistributor")
+  listingImports            ListingImport[]
+  listingImportAudits       ListingImportAuditEvent[]
+
+  @@map("organizations")
+}
+
+model OrganizationMembership {
+  id             String           @id @default(uuid()) @db.Uuid
+  userId         String           @map("user_id") @db.Uuid
+  organizationId String           @map("organization_id") @db.Uuid
+  role           MembershipRole
+  status         MembershipStatus @default(INVITED)
+  createdAt      DateTime         @default(now()) @map("created_at")
+  updatedAt      DateTime         @updatedAt @map("updated_at")
+
+  user         User         @relation(fields: [userId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@unique([userId, organizationId])
+  @@index([organizationId])
+  @@index([role])
+  @@index([status])
+  @@map("organization_memberships")
+}
+
+model IdentityAccount {
+  id              String           @id @default(uuid()) @db.Uuid
+  userId          String           @map("user_id") @db.Uuid
+  provider        IdentityProvider
+  providerSubject String           @map("provider_subject")
+  createdAt       DateTime         @default(now()) @map("created_at")
+  updatedAt       DateTime         @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@unique([provider, providerSubject])
+  @@index([userId])
+  @@map("identity_accounts")
+}
+
+enum CatalogStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum IngredientKind {
+  ACTIVE
+  SALT
+}
+
+enum StrengthUnit {
+  MG
+  MCG
+  G
+  ML
+  IU
+  PERCENT
+}
+
+enum PackUnit {
+  TABLET
+  CAPSULE
+  ML
+  G
+  VIAL
+  BOTTLE
+  PIECE
+}
+
+enum MedicineCompanyRole {
+  MANUFACTURER
+  MARKETER
+}
+
+model Ingredient {
+  id             String         @id @default(uuid()) @db.Uuid
+  canonicalName  String         @map("canonical_name")
+  normalizedName String         @unique @map("normalized_name")
+  kind           IngredientKind @default(ACTIVE)
+  createdAt      DateTime       @default(now()) @map("created_at")
+  updatedAt      DateTime       @updatedAt @map("updated_at")
+
+  aliases      IngredientAlias[]
+  compositions MedicineComposition[]
+
+  @@map("ingredients")
+}
+
+model IngredientAlias {
+  id              String   @id @default(uuid()) @db.Uuid
+  ingredientId    String   @map("ingredient_id") @db.Uuid
+  alias           String
+  normalizedAlias String   @unique @map("normalized_alias")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  ingredient Ingredient @relation(fields: [ingredientId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([ingredientId])
+  @@map("ingredient_aliases")
+}
+
+model Manufacturer {
+  id             String   @id @default(uuid()) @db.Uuid
+  canonicalName  String   @map("canonical_name")
+  normalizedName String   @unique @map("normalized_name")
+  countryCode    String?  @map("country_code")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  medicines MedicineManufacturer[]
+
+  @@map("manufacturers")
+}
+
+model Medicine {
+  id                     String        @id @default(uuid()) @db.Uuid
+  displayName            String        @map("display_name")
+  normalizedDisplayName  String        @unique @map("normalized_display_name")
+  brandName              String?       @map("brand_name")
+  genericName            String        @map("generic_name")
+  dosageForm             String        @map("dosage_form")
+  presentation           String?
+  status                 CatalogStatus @default(DRAFT)
+  searchVisible          Boolean       @default(false) @map("search_visible")
+  sourceLabel            String        @default("manual") @map("source_label")
+  sourceReference        String?       @map("source_reference")
+  searchText             String        @default("") @map("search_text")
+  createdAt              DateTime      @default(now()) @map("created_at")
+  updatedAt              DateTime      @updatedAt @map("updated_at")
+
+  compositions MedicineComposition[]
+  packs        MedicinePack[]
+  companies    MedicineManufacturer[]
+
+  @@index([status, searchVisible])
+  @@index([searchText(ops: raw("gin_trgm_ops"))], type: Gin, map: "medicines_search_text_trgm_idx")
+  @@map("medicines")
+}
+
+model MedicineComposition {
+  id            String       @id @default(uuid()) @db.Uuid
+  medicineId    String       @map("medicine_id") @db.Uuid
+  ingredientId  String       @map("ingredient_id") @db.Uuid
+  strengthValue Decimal      @map("strength_value") @db.Decimal(18, 6)
+  strengthUnit  StrengthUnit @map("strength_unit")
+  basis         String?
+  sequence      Int
+  createdAt     DateTime     @default(now()) @map("created_at")
+  updatedAt     DateTime     @updatedAt @map("updated_at")
+
+  medicine   Medicine   @relation(fields: [medicineId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  ingredient Ingredient @relation(fields: [ingredientId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@unique([medicineId, ingredientId])
+  @@unique([medicineId, sequence])
+  @@index([ingredientId])
+  @@map("medicine_compositions")
+}
+
+model MedicinePack {
+  id          String   @id @default(uuid()) @db.Uuid
+  medicineId  String   @map("medicine_id") @db.Uuid
+  description String
+  quantity    Decimal  @db.Decimal(18, 6)
+  unit        PackUnit
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  medicine Medicine             @relation(fields: [medicineId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  listings  DistributorListing[]
+  importRows ListingImportRow[]
+
+  @@unique([medicineId, description])
+  @@index([medicineId])
+  @@map("medicine_packs")
+}
+
+model MedicineManufacturer {
+  id             String               @id @default(uuid()) @db.Uuid
+  medicineId     String               @map("medicine_id") @db.Uuid
+  manufacturerId String               @map("manufacturer_id") @db.Uuid
+  role           MedicineCompanyRole
+  createdAt      DateTime             @default(now()) @map("created_at")
+  updatedAt      DateTime             @updatedAt @map("updated_at")
+
+  medicine     Medicine     @relation(fields: [medicineId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  manufacturer Manufacturer @relation(fields: [manufacturerId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@unique([medicineId, manufacturerId, role])
+  @@index([manufacturerId])
+  @@map("medicine_manufacturers")
+}
+
+model CatalogAuditEvent {
+  id          String   @id @default(uuid()) @db.Uuid
+  actorUserId String   @map("actor_user_id") @db.Uuid
+  action      String
+  entityType  String   @map("entity_type")
+  entityId    String   @map("entity_id") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  actor User @relation(fields: [actorUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([actorUserId])
+  @@index([entityType, entityId])
+  @@map("catalog_audit_events")
+}
+
+enum ListingStatus {
+  ACTIVE
+  PAUSED
+  ARCHIVED
+  SUSPENDED
+}
+
+enum StockStatus {
+  IN_STOCK
+  LOW_STOCK
+  OUT_OF_STOCK
+  UNKNOWN
+}
+
+enum ListingCurrency {
+  INR
+}
+
+enum ListingSource {
+  MANUAL
+  CSV_IMPORT
+  API_INTEGRATION
+  SFTP_IMPORT
+  ERP_INTEGRATION
+  POS_INTEGRATION
+}
+
+model DistributorListing {
+  id                   String          @id @default(uuid()) @db.Uuid
+  organizationId       String          @map("organization_id") @db.Uuid
+  medicinePackId       String          @map("medicine_pack_id") @db.Uuid
+  status               ListingStatus   @default(ACTIVE)
+  unitPrice            Decimal         @map("unit_price") @db.Decimal(12, 2)
+  currency             ListingCurrency @default(INR)
+  minimumOrderQuantity Decimal         @map("minimum_order_quantity") @db.Decimal(18, 6)
+  stockStatus          StockStatus     @default(UNKNOWN) @map("stock_status")
+  availableQuantity    Decimal?        @map("available_quantity") @db.Decimal(18, 6)
+  priceUpdatedAt       DateTime?       @map("price_updated_at")
+  stockUpdatedAt       DateTime?       @map("stock_updated_at")
+  source               ListingSource   @default(MANUAL)
+  sourceNote           String?         @map("source_note")
+  createdAt            DateTime        @default(now()) @map("created_at")
+  updatedAt            DateTime        @updatedAt @map("updated_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  medicinePack MedicinePack @relation(fields: [medicinePackId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  audits       ListingAuditEvent[]
+  enquiries    ProcurementEnquiry[]
+  importRows   ListingImportRow[]
+
+  @@unique([organizationId, medicinePackId])
+  @@index([organizationId, status])
+  @@index([medicinePackId, status])
+  @@index([status, unitPrice])
+  @@map("distributor_listings")
+}
+
+model ListingAuditEvent {
+  id             String   @id @default(uuid()) @db.Uuid
+  actorUserId    String   @map("actor_user_id") @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  listingId      String   @map("listing_id") @db.Uuid
+  action         String
+  importId       String?  @map("import_id") @db.Uuid
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  actor        User                @relation(fields: [actorUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  organization Organization        @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  listing      DistributorListing  @relation(fields: [listingId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  import       ListingImport?      @relation(fields: [importId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([organizationId])
+  @@index([listingId])
+  @@index([actorUserId])
+  @@map("listing_audit_events")
+}
+
+enum EnquiryStatus {
+  OPEN
+  RESPONDED
+  CLOSED
+}
+
+model ProcurementEnquiry {
+  id                         String        @id @default(uuid()) @db.Uuid
+  retailerOrganizationId     String        @map("retailer_organization_id") @db.Uuid
+  distributorOrganizationId  String        @map("distributor_organization_id") @db.Uuid
+  listingId                  String        @map("listing_id") @db.Uuid
+  requestedQuantity          Int           @map("requested_quantity")
+  message                    String?
+  status                     EnquiryStatus @default(OPEN)
+  responseMessage            String?       @map("response_message")
+  respondedByUserId          String?       @map("responded_by_user_id") @db.Uuid
+  respondedAt                DateTime?     @map("responded_at")
+  createdByUserId            String        @map("created_by_user_id") @db.Uuid
+  createdAt                  DateTime      @default(now()) @map("created_at")
+  updatedAt                  DateTime      @updatedAt @map("updated_at")
+
+  retailerOrganization    Organization       @relation("EnquiryRetailer", fields: [retailerOrganizationId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  distributorOrganization Organization       @relation("EnquiryDistributor", fields: [distributorOrganizationId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  listing                 DistributorListing @relation(fields: [listingId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  createdBy               User               @relation("EnquiryCreator", fields: [createdByUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  respondedBy             User?              @relation("EnquiryResponder", fields: [respondedByUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  audits                  ProcurementEnquiryAuditEvent[]
+
+  @@index([retailerOrganizationId, status, createdAt])
+  @@index([distributorOrganizationId, status, createdAt])
+  @@index([listingId, createdAt])
+  @@map("procurement_enquiries")
+}
+
+model ProcurementEnquiryAuditEvent {
+  id                        String   @id @default(uuid()) @db.Uuid
+  actorUserId               String   @map("actor_user_id") @db.Uuid
+  retailerOrganizationId    String   @map("retailer_organization_id") @db.Uuid
+  distributorOrganizationId String   @map("distributor_organization_id") @db.Uuid
+  enquiryId                 String   @map("enquiry_id") @db.Uuid
+  action                    String
+  createdAt                 DateTime @default(now()) @map("created_at")
+
+  actor                   User                @relation(fields: [actorUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  retailerOrganization    Organization        @relation("EnquiryAuditRetailer", fields: [retailerOrganizationId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  distributorOrganization Organization        @relation("EnquiryAuditDistributor", fields: [distributorOrganizationId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  enquiry                 ProcurementEnquiry  @relation(fields: [enquiryId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([enquiryId])
+  @@index([actorUserId])
+  @@map("procurement_enquiry_audit_events")
+}
+
+enum ListingImportStatus {
+  PREVIEW_READY
+  COMMITTED
+  FAILED
+  CANCELLED
+}
+
+enum ListingImportAction {
+  CREATE
+  UPDATE
+}
+
+enum ListingImportOutcome {
+  APPLIED
+  FAILED
+  SKIPPED
+}
+
+model ListingImport {
+  id              String              @id @default(uuid()) @db.Uuid
+  organizationId  String              @map("organization_id") @db.Uuid
+  uploadedByUserId String             @map("uploaded_by_user_id") @db.Uuid
+  fileName        String              @map("file_name")
+  checksum        String
+  byteSize        Int                 @map("byte_size")
+  status          ListingImportStatus @default(PREVIEW_READY)
+  totalRows       Int                 @default(0) @map("total_rows")
+  validRows       Int                 @default(0) @map("valid_rows")
+  invalidRows     Int                 @default(0) @map("invalid_rows")
+  createdRows     Int                 @default(0) @map("created_rows")
+  updatedRows     Int                 @default(0) @map("updated_rows")
+  skippedRows     Int                 @default(0) @map("skipped_rows")
+  failedRows      Int                 @default(0) @map("failed_rows")
+  createdAt       DateTime            @default(now()) @map("created_at")
+  completedAt     DateTime?           @map("completed_at")
+
+  organization Organization          @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  uploadedBy   User                  @relation("ListingImportUploader", fields: [uploadedByUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  rows         ListingImportRow[]
+  audits       ListingImportAuditEvent[]
+  listingAudits ListingAuditEvent[]
+
+  @@index([organizationId, status, createdAt])
+  @@index([organizationId, checksum])
+  @@map("listing_imports")
+}
+
+model ListingImportRow {
+  id                       String                 @id @default(uuid()) @db.Uuid
+  importId                 String                 @map("import_id") @db.Uuid
+  rowNumber                Int                    @map("row_number")
+  medicineName             String?                @map("medicine_name")
+  packIdText               String?                @map("pack_id_text")
+  packDescription          String?                @map("pack_description")
+  indicativeUnitPrice      String?                @map("indicative_unit_price")
+  currency                 String?
+  minimumOrderQuantity     String?                @map("minimum_order_quantity")
+  stockStatus              String?                @map("stock_status")
+  availableQuantity        String?                @map("available_quantity")
+  availableQuantityProvided Boolean               @default(false) @map("available_quantity_provided")
+  sourceNote               String?                @map("source_note")
+  sourceNoteProvided       Boolean                @default(false) @map("source_note_provided")
+  matchedPackId            String?                @map("matched_pack_id") @db.Uuid
+  existingListingId        String?                @map("existing_listing_id") @db.Uuid
+  action                   ListingImportAction?
+  errors                   String[]
+  warnings                 String[]
+  outcome                  ListingImportOutcome?
+  createdAt                DateTime               @default(now()) @map("created_at")
+
+  import          ListingImport       @relation(fields: [importId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  matchedPack     MedicinePack?       @relation(fields: [matchedPackId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  existingListing DistributorListing? @relation(fields: [existingListingId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@unique([importId, rowNumber])
+  @@index([importId])
+  @@map("listing_import_rows")
+}
+
+model ListingImportAuditEvent {
+  id             String   @id @default(uuid()) @db.Uuid
+  actorUserId    String   @map("actor_user_id") @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  importId       String   @map("import_id") @db.Uuid
+  action         String
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  actor        User           @relation(fields: [actorUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  organization Organization   @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  import       ListingImport  @relation(fields: [importId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([importId])
+  @@index([actorUserId])
+  @@map("listing_import_audit_events")
+}
