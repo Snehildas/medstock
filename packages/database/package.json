@@ -12,9 +12,13 @@
     "typecheck": "prisma generate && tsc -p tsconfig.json --noEmit",
     "lint": "eslint src --ignore-pattern src/generated/**",
     "validate": "prisma validate",
+    "demo:assert": "node dist/demo/cli.js assert",
+    "demo:seed": "node dist/demo/cli.js seed",
+    "demo:reset": "node dist/demo/cli.js reset",
     "test": "prisma migrate deploy && NODE_OPTIONS='--experimental-vm-modules' jest --config jest.config.cjs --runInBand"
   },
   "dependencies": {
+    "@medstock/shared-types": "workspace:*",
     "@prisma/adapter-pg": "7.10.1",
     "@prisma/client": "7.10.1",
     "pg": "8.23.1"

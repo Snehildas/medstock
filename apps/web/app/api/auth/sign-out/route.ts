@@ -3,9 +3,14 @@ import { logoutUrl } from "@/lib/cognito";
 import { localPreviewAllowed, PREVIEW_ORGANIZATION_COOKIE } from "@/lib/preview-mode";
 import { sameOriginMutation } from "@/lib/request-origin";
 import { cookiesClearedOnSignOut } from "@/lib/session";
+import { limitWebRequest } from "@/lib/rate-limit";
 import { loadWebAuthConfig } from "@/lib/web-auth-config";
 
 export function POST(request: NextRequest) {
+  const limited = limitWebRequest(request, "auth");
+  if (limited) {
+    return limited;
+  }
   if (!allowedMutation(request)) {
     return NextResponse.json(
       { error: { code: "forbidden", message: "This request was not sent from MedStock." } },

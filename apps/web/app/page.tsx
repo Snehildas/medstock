@@ -25,7 +25,7 @@ export default function Home() {
             </Button>
             {localPreviewAllowed(process.env) ? (
               <Button asChild variant="outline">
-                <Link href="/app">Open local preview</Link>
+                <Link href="/app/discover">Open local preview</Link>
               </Button>
             ) : null}
           </div>

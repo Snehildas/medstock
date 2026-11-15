@@ -20,6 +20,10 @@ export function requestContext(request: IncomingRequest, response: OutgoingRespo
   const incoming = request.header("x-request-id") ?? "";
   const requestId = requestIdPattern.test(incoming) ? incoming : randomUUID();
   response.setHeader("x-request-id", requestId);
+  response.setHeader("X-Content-Type-Options", "nosniff");
+  response.setHeader("Referrer-Policy", "no-referrer");
+  response.setHeader("X-Frame-Options", "DENY");
+  response.setHeader("Cache-Control", "no-store");
   const started = Date.now();
   response.on("finish", () => {
     logger.log(

@@ -15,7 +15,21 @@ type MedicineDetail = {
   packs: Array<{ id: string; description: string; quantity: string; unit: string }>;
 };
 
-export function ListingCreateForm({ organizationId }: { organizationId: string }) {
+export function ListingCreateForm({
+  organizationId,
+  initialMedicineId,
+  commercialDefaults,
+}: {
+  organizationId: string;
+  initialMedicineId?: string;
+  commercialDefaults?: {
+    unitPrice: string;
+    minimumOrderQuantity: string;
+    stockStatus: string;
+    availableQuantity: string;
+    sourceNote: string;
+  };
+}) {
   const [state, action] = useActionState(createListingAction, initialState);
   const [medicines, setMedicines] = useState<Array<{ id: string; displayName: string; genericName: string; dosageForm: string }>>([]);
   const [medicine, setMedicine] = useState<MedicineDetail | null>(null);
@@ -31,7 +45,10 @@ export function ListingCreateForm({ organizationId }: { organizationId: string }
       setSearching(false);
     }
     previousOrganizationId.current = organizationId;
-  }, [organizationId]);
+    if (initialMedicineId) {
+      void chooseMedicine(initialMedicineId);
+    }
+  }, [organizationId, initialMedicineId]);
 
   async function search(formData: FormData) {
     setSearching(true);
@@ -127,13 +144,13 @@ export function ListingCreateForm({ organizationId }: { organizationId: string }
           )}
           <FieldError message={state.fieldErrors.medicinePackId} />
         </fieldset>
-        <CommercialFields fieldErrors={state.fieldErrors} />
+        <CommercialFields fieldErrors={state.fieldErrors} defaults={commercialDefaults} />
         {state.message ? (
           <p className="text-sm text-destructive" role="alert">
             {state.message}
           </p>
         ) : null}
-        <PendingButton pendingLabel="Creating listing…">Create listing</PendingButton>
+        <PendingButton pendingLabel="Adding medicine…">Add existing medicine</PendingButton>
         <p className="text-sm text-muted-foreground">
           The price is indicative. Creating a listing does not guarantee that stock is available.
         </p>
@@ -163,8 +180,8 @@ export function CommercialFields({
         <FieldError message={fieldErrors.unitPrice} />
       </label>
         <label className="grid gap-1.5 text-sm font-medium">
-        Minimum order quantity
-        <input name="minimumOrderQuantity" defaultValue={defaults?.minimumOrderQuantity} inputMode="decimal" className="h-9 rounded-lg border px-2" required />
+        Minimum order quantity (whole packs)
+        <input name="minimumOrderQuantity" defaultValue={defaults?.minimumOrderQuantity} inputMode="numeric" className="h-9 rounded-lg border px-2" required />
         <FieldError message={fieldErrors.minimumOrderQuantity} />
       </label>
         <label className="grid gap-1.5 text-sm font-medium">

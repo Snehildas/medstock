@@ -73,6 +73,66 @@ export function accessTokenExpired(session: SessionPayload, now = Date.now()): b
   return session.expiresAt <= now;
 }
 
+export type RefreshDecision = "refresh" | "use-current-session" | "sign-out";
+
+export type RefreshResult = "store" | "sign-out" | "keep-session";
+
+/**
+ * A second refresh within the retry window signs the user out only when the
+ * access token is still expired. A concurrent tab that already received a
+ * renewed access token is sent onward without calling Cognito again.
+ */
+export function decideRefresh(input: {
+  hasSession: boolean;
+  accessTokenStillValid: boolean;
+  retryAlreadyUsed: boolean;
+}): RefreshDecision {
+  if (!input.hasSession) {
+    return "sign-out";
+  }
+  if (input.retryAlreadyUsed && input.accessTokenStillValid) {
+    return "use-current-session";
+  }
+  if (input.retryAlreadyUsed) {
+    return "sign-out";
+  }
+  return "refresh";
+}
+
+export function refreshResult(input: { networkFailed: boolean; tokenResponseOk: boolean; tokenParsed: boolean }): RefreshResult {
+  if (input.networkFailed) {
+    return "keep-session";
+  }
+  if (!input.tokenResponseOk || !input.tokenParsed) {
+    return "sign-out";
+  }
+  return "store";
+}
+
+const refreshFlights = new Map<string, Promise<unknown>>();
+
+export function refreshFlightKey(refreshToken: string): string {
+  return createHash("sha256").update(refreshToken).digest("base64url");
+}
+
+export async function singleFlightRefresh<T>(key: string, work: () => Promise<T>): Promise<T> {
+  const existing = refreshFlights.get(key) as Promise<T> | undefined;
+  if (existing) {
+    return existing;
+  }
+  const pending = work().finally(() => {
+    if (refreshFlights.get(key) === pending) {
+      refreshFlights.delete(key);
+    }
+  });
+  refreshFlights.set(key, pending);
+  return pending;
+}
+
+export function resetRefreshFlights(): void {
+  refreshFlights.clear();
+}
+
 function sessionKey(secret: string): Buffer {
   return createHash("sha256").update(secret).digest();
 }

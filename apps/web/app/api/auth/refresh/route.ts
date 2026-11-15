@@ -1,15 +1,23 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
+import { demoModeEnabled } from "@medstock/shared-types";
 import { authorizationHeader, safeReturnPath, tokenEndpoint } from "@/lib/cognito";
+import { loadDemoWebConfig } from "@/lib/demo-mode";
 import { sameOriginMutation } from "@/lib/request-origin";
 import {
   AUTH_RETRY_COOKIE,
+  accessTokenExpired,
   cookieSecure,
+  decideRefresh,
   openSession,
+  refreshFlightKey,
+  refreshResult,
   sealSession,
+  singleFlightRefresh,
   SESSION_COOKIE,
   sessionCookieMaxAge,
 } from "@/lib/session";
+import { limitWebRequest } from "@/lib/rate-limit";
 import { loadWebAuthConfig } from "@/lib/web-auth-config";
 
 const tokenSchema = z.object({
@@ -19,6 +27,10 @@ const tokenSchema = z.object({
 });
 
 export async function GET(request: NextRequest) {
+  const limited = limitWebRequest(request, "auth");
+  if (limited) {
+    return limited;
+  }
   if (
     !sameOriginMutation({
       method: request.method,
@@ -29,16 +41,28 @@ export async function GET(request: NextRequest) {
   ) {
     return NextResponse.redirect(new URL("/sign-in", request.url));
   }
-  const config = loadWebAuthConfig(process.env);
   const returnTo = safeReturnPath(request.nextUrl.searchParams.get("returnTo") ?? undefined);
+  if (demoModeEnabled(process.env)) {
+    return demoRefresh(request, returnTo);
+  }
+  const config = loadWebAuthConfig(process.env);
   if (!config) {
     return NextResponse.redirect(new URL("/sign-in?reason=unconfigured", request.url));
   }
-  if (request.cookies.get(AUTH_RETRY_COOKIE)?.value === "1") {
-    return clearSession(request, "expired");
-  }
   const sealed = request.cookies.get(SESSION_COOKIE)?.value;
   const session = sealed ? openSession(sealed, config.sessionSecret) : null;
+  const retryAlreadyUsed = request.cookies.get(AUTH_RETRY_COOKIE)?.value === "1";
+  const decision = decideRefresh({
+    hasSession: session !== null,
+    accessTokenStillValid: session !== null && !accessTokenExpired(session),
+    retryAlreadyUsed,
+  });
+  if (decision === "sign-out") {
+    return clearSession(request, "expired");
+  }
+  if (decision === "use-current-session") {
+    return NextResponse.redirect(new URL(returnTo, request.url));
+  }
   if (!session) {
     return clearSession(request, "expired");
   }
@@ -52,9 +76,29 @@ export async function GET(request: NextRequest) {
   if (basic) {
     headers.set("authorization", basic);
   }
-  const tokenResponse = await fetch(tokenEndpoint(config), { method: "POST", headers, body, cache: "no-store" });
-  const parsed = tokenSchema.safeParse(await tokenResponse.json().catch(() => null));
-  if (!tokenResponse.ok || !parsed.success) {
+  let exchanged: { accessToken: string; refreshToken: string; expiresIn: number } | null;
+  try {
+    exchanged = await singleFlightRefresh(refreshFlightKey(session.refreshToken), async () => {
+      const tokenResponse = await fetch(tokenEndpoint(config), { method: "POST", headers, body, cache: "no-store" });
+      const parsed = tokenSchema.safeParse(await tokenResponse.json().catch(() => null));
+      const outcome = refreshResult({
+        networkFailed: false,
+        tokenResponseOk: tokenResponse.ok,
+        tokenParsed: parsed.success,
+      });
+      if (outcome !== "store" || !parsed.success) {
+        return null;
+      }
+      return {
+        accessToken: parsed.data.access_token,
+        refreshToken: parsed.data.refresh_token ?? session.refreshToken,
+        expiresIn: parsed.data.expires_in,
+      };
+    });
+  } catch {
+    return NextResponse.redirect(new URL("/sign-in?reason=unavailable", request.url));
+  }
+  if (!exchanged) {
     return clearSession(request, "expired");
   }
   const response = NextResponse.redirect(new URL(returnTo, request.url));
@@ -62,9 +106,9 @@ export async function GET(request: NextRequest) {
     SESSION_COOKIE,
     sealSession(
       {
-        accessToken: parsed.data.access_token,
-        refreshToken: parsed.data.refresh_token ?? session.refreshToken,
-        expiresAt: Date.now() + parsed.data.expires_in * 1000,
+        accessToken: exchanged.accessToken,
+        refreshToken: exchanged.refreshToken,
+        expiresAt: Date.now() + exchanged.expiresIn * 1000,
       },
       config.sessionSecret,
     ),
@@ -84,6 +128,19 @@ export async function GET(request: NextRequest) {
     maxAge: 60,
   });
   return response;
+}
+
+function demoRefresh(request: NextRequest, returnTo: string): NextResponse {
+  const config = loadDemoWebConfig(process.env);
+  if (!config) {
+    return NextResponse.redirect(new URL("/sign-in?reason=unconfigured", request.url));
+  }
+  const sealed = request.cookies.get(SESSION_COOKIE)?.value;
+  const session = sealed ? openSession(sealed, config.sessionSecret) : null;
+  if (!session || !session.accessToken.startsWith("medstock-demo.v1.") || accessTokenExpired(session)) {
+    return clearSession(request, "expired");
+  }
+  return NextResponse.redirect(new URL(returnTo, request.url));
 }
 
 function clearSession(request: NextRequest, reason: string): NextResponse {

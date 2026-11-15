@@ -35,6 +35,7 @@ export function AppFrame({
   email,
   organizationName,
   preview,
+  demo = false,
   exitLabel,
   children,
 }: {
@@ -44,6 +45,7 @@ export function AppFrame({
   email: string;
   organizationName: string;
   preview: boolean;
+  demo?: boolean;
   exitLabel: string;
   children: ReactNode;
 }) {
@@ -57,6 +59,11 @@ export function AppFrame({
           LOCAL PREVIEW · MOCK DATA · NOT AUTHENTICATED
         </p>
       ) : null}
+      {!preview && demo ? (
+        <p className="bg-warning/20 px-3 py-1.5 text-center text-xs font-semibold tracking-wide text-foreground" role="status">
+          DEMO ENVIRONMENT — SAMPLE DATA ONLY
+        </p>
+      ) : null}
       <div className="flex min-h-0 flex-1">
         {open ? (
           <button
@@ -68,7 +75,7 @@ export function AppFrame({
         ) : null}
         <aside
           className={`fixed bottom-0 left-0 z-40 flex w-64 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground transition-transform lg:static lg:top-auto lg:translate-x-0 ${
-            preview ? "top-8" : "top-0"
+            preview || demo ? "top-8" : "top-0"
           } ${open ? "translate-x-0" : "-translate-x-full"}`}
           aria-label="Application"
         >

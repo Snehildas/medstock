@@ -22,6 +22,7 @@ import {
   ListingForbiddenError,
   ListingNotFoundError,
   OrganizationNotDistributorError,
+  ProfileContactRequiredError,
 } from "../identity/domain-error.js";
 import { IDENTITY_VERIFIER } from "../identity/identity-verifier.js";
 import { IdentityService } from "../identity/identity.service.js";
@@ -83,6 +84,12 @@ describe("listing service", () => {
   });
 
   afterEach(async () => {
+    await prisma.distributorProfileAuditEvent.deleteMany({
+      where: { organization: { slug: { contains: testRun } } },
+    });
+    await prisma.distributorProfile.deleteMany({
+      where: { organization: { slug: { contains: testRun } } },
+    });
     await prisma.listingAuditEvent.deleteMany({
       where: { organization: { slug: { contains: testRun } } },
     });
@@ -106,6 +113,12 @@ describe("listing service", () => {
     expect(created.availableQuantity).toBeNull();
     expect(created.medicinePack.quantity.toString()).toBe("10");
     expect(created.source).toBe("MANUAL");
+    expect(created.priceUpdatedAt).toBeInstanceOf(Date);
+    expect(created.stockUpdatedAt).toBeInstanceOf(Date);
+    const createdAudit = await prisma.listingAuditEvent.findFirst({
+      where: { listingId: created.id, action: "listing.create" },
+    });
+    expect(createdAudit?.actorUserId).toBe(ownerId);
 
     const priced = await listings.update(staffId, created.id, { unitPrice: "11" });
     expect(priced.priceUpdatedAt?.getTime()).not.toBe(created.priceUpdatedAt?.getTime());
@@ -129,6 +142,24 @@ describe("listing service", () => {
     ).rejects.toBeInstanceOf(ListingForbiddenError);
     await expect(
       listings.create(retailerId, distributorId, {
+        medicinePackId: pack.id,
+        unitPrice: "10",
+        currency: "INR",
+        minimumOrderQuantity: "1",
+        stockStatus: "UNKNOWN",
+      }),
+    ).rejects.toBeInstanceOf(ListingForbiddenError);
+    const invitedId = await user("invited-writer");
+    await prisma.organizationMembership.create({
+      data: {
+        userId: invitedId,
+        organizationId: distributorId,
+        role: MembershipRole.DISTRIBUTOR_OWNER,
+        status: MembershipStatus.INVITED,
+      },
+    });
+    await expect(
+      listings.create(invitedId, distributorId, {
         medicinePackId: pack.id,
         unitPrice: "10",
         currency: "INR",
@@ -227,6 +258,89 @@ describe("listing service", () => {
     await expect(listings.getForRetailer(retailerId, visible.id)).rejects.toBeInstanceOf(
       ListingNotFoundError,
     );
+  });
+
+  it("publishes wholesaler contact only for the owning distributor and eligible listings", async () => {
+    const pack = await packFor(label("Contact Pack"), true);
+    const secondPack = await prisma.medicinePack.create({
+      data: {
+        medicineId: pack.medicineId,
+        description: label("Contact second pack"),
+        quantity: "20",
+        unit: PackUnit.TABLET,
+      },
+    });
+    const active = await listings.create(ownerId, distributorId, offer(pack.id, "15"));
+    const paused = await listings.create(ownerId, distributorId, offer(secondPack.id, "10"));
+    await listings.pause(ownerId, paused.id);
+    const other = await listings.create(otherOwnerId, otherDistributorId, offer(pack.id, "18"));
+    await expect(
+      listings.updateProfile(ownerId, distributorId, {
+        proprietorName: "Mr. Manjunath",
+        landlineNumber: null,
+        mobileNumber: null,
+        publish: true,
+      }),
+    ).rejects.toBeInstanceOf(ProfileContactRequiredError);
+    await expect(
+      listings.updateProfile(staffId, distributorId, {
+        proprietorName: "Staff",
+        landlineNumber: "+918212445566",
+        mobileNumber: null,
+        publish: true,
+      }),
+    ).rejects.toBeInstanceOf(ListingForbiddenError);
+    await expect(
+      listings.updateProfile(otherOwnerId, distributorId, {
+        proprietorName: "Other",
+        landlineNumber: "+918212445566",
+        mobileNumber: null,
+        publish: true,
+      }),
+    ).rejects.toBeInstanceOf(ListingForbiddenError);
+    const published = await listings.updateProfile(ownerId, distributorId, {
+      proprietorName: "Mr. Manjunath",
+      landlineNumber: "+918212445566",
+      mobileNumber: "+919812345678",
+      publish: true,
+    });
+    expect(published.landlineNumber).toBe("+918212445566");
+    expect(published.mobileNumber).toBe("+919812345678");
+    const audit = await prisma.distributorProfileAuditEvent.findFirst({
+      where: { organizationId: distributorId, action: "profile.publish" },
+    });
+    expect(audit?.actorUserId).toBe(ownerId);
+    expect(JSON.stringify(audit)).not.toContain("98123");
+    const staffView = await listings.getProfile(staffId, distributorId);
+    expect(staffView.proprietorName).toBe("Mr. Manjunath");
+    const adminView = await listings.getProfile(adminId, distributorId);
+    expect(adminView.published).toBe(true);
+    await expect(listings.getProfile(retailerId, distributorId)).rejects.toBeInstanceOf(ListingForbiddenError);
+    await expect(listings.getProfile(otherOwnerId, distributorId)).rejects.toBeInstanceOf(ListingForbiddenError);
+    const page = await listings.listWholesalers(retailerId, pack.medicineId, {
+      q: "",
+      page: 1,
+      pageSize: 20,
+    });
+    expect(page.items.map((item) => item.id)).not.toContain(paused.id);
+    expect(page.items.map((item) => item.id).sort()).toEqual([active.id, other.id].sort());
+    expect(page.eligibleWholesalerCount).toBe(2);
+    const withContact = page.items.find((item) => item.id === active.id);
+    expect(withContact?.organization.name).toBe(label("own"));
+    expect(withContact?.organization.distributorProfile?.proprietorName).toBe("Mr. Manjunath");
+    const withoutContact = page.items.find((item) => item.id === other.id);
+    expect(withoutContact?.organization.distributorProfile).toBeNull();
+    await expect(
+      listings.listWholesalers(ownerId, pack.medicineId, { q: "", page: 1, pageSize: 20 }),
+    ).rejects.toBeInstanceOf(ListingForbiddenError);
+    const adminPage = await listings.listWholesalers(adminId, pack.medicineId, { q: "", page: 1, pageSize: 20 });
+    expect(adminPage.total).toBe(2);
+    const named = await listings.listWholesalers(retailerId, pack.medicineId, {
+      q: label("own"),
+      page: 1,
+      pageSize: 20,
+    });
+    expect(named.items.map((item) => item.id)).toEqual([active.id]);
   });
 
   function offer(medicinePackId: string, unitPrice: string) {
@@ -397,6 +511,18 @@ describe("listing HTTP boundary", () => {
         });
       expect(rejected.status).toBe(400);
       expect(JSON.stringify(rejected.body)).toContain("role");
+      const badPrice = await request(app.getHttpServer())
+        .post("/distributor/listings")
+        .query({ organizationId: distributor.id })
+        .set("Authorization", `Bearer ${ownerToken}`)
+        .send({ medicinePackId: pack.id, unitPrice: "1.234", minimumOrderQuantity: "1" });
+      expect(badPrice.status).toBe(400);
+      const badQuantity = await request(app.getHttpServer())
+        .post("/distributor/listings")
+        .query({ organizationId: distributor.id })
+        .set("Authorization", `Bearer ${ownerToken}`)
+        .send({ medicinePackId: pack.id, unitPrice: "9", minimumOrderQuantity: "1.5" });
+      expect(badQuantity.status).toBe(400);
 
       const created = await request(app.getHttpServer())
         .post("/distributor/listings")
@@ -418,6 +544,7 @@ describe("listing HTTP boundary", () => {
       expect(page.items).toHaveLength(1);
       expect(retailerListingSchema.parse(page.items[0]).distributor.name).toBe(label("HTTP Dist"));
       expect(JSON.stringify(page.items[0])).not.toContain("sourceNote");
+      expect(JSON.stringify(page.items[0])).not.toContain("landline");
     } finally {
       await app.close();
     }

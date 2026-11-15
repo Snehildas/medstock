@@ -2,9 +2,11 @@ import { Injectable } from "@nestjs/common";
 import {
   CatalogStatus,
   IngredientKind,
+  ListingStatus,
   MedicineCompanyRole,
   MembershipRole,
   MembershipStatus,
+  OrganizationStatus,
   OrganizationType,
   PackUnit,
   Prisma,
@@ -38,6 +40,30 @@ import { prismaErrorCode } from "../identity/prisma-error.js";
 import { buildSearchText } from "./search-text.js";
 
 type Tx = Prisma.TransactionClient;
+
+export type SubmittedMedicineInput = {
+  submissionId: string;
+  displayName: string;
+  brandName: string | null;
+  genericName: string | null;
+  dosageForm: string;
+  presentation: string | null;
+  manufacturerName: string | null;
+  marketerName: string | null;
+  ingredients: Array<{
+    ingredientName: string;
+    kind: "ACTIVE" | "SALT";
+    strengthValue: string;
+    strengthUnit: "MG" | "MCG" | "G" | "ML" | "IU" | "PERCENT";
+    basis: string | null;
+    sequence: number;
+  }>;
+  packs: Array<{
+    description: string;
+    quantity: string;
+    unit: "TABLET" | "CAPSULE" | "ML" | "G" | "VIAL" | "BOTTLE" | "PIECE";
+  }>;
+};
 
 const medicineInclude = {
   compositions: {
@@ -456,6 +482,7 @@ export class CatalogService {
         ? []
         : await this.prisma.medicine.findMany({ where: { id: { in: ids } } });
     const byId = new Map(medicines.map((medicine) => [medicine.id, medicine]));
+    const wholesalerCounts = await this.eligibleWholesalerCounts(ids);
     return {
       items: ids.flatMap((id) => {
         const medicine = byId.get(id);
@@ -472,6 +499,7 @@ export class CatalogService {
             presentation: medicine.presentation,
             status: medicine.status,
             searchVisible: medicine.searchVisible,
+            eligibleWholesalerCount: wholesalerCounts.get(medicine.id) ?? 0,
           },
         ];
       }),
@@ -479,6 +507,170 @@ export class CatalogService {
       pageSize,
       total: Number(totalRows[0]?.total ?? 0),
     };
+  }
+
+  private async eligibleWholesalerCounts(medicineIds: string[]): Promise<Map<string, number>> {
+    if (medicineIds.length === 0) {
+      return new Map();
+    }
+    const rows = await this.prisma.distributorListing.findMany({
+      where: {
+        status: ListingStatus.ACTIVE,
+        organization: { type: OrganizationType.DISTRIBUTOR, status: OrganizationStatus.ACTIVE },
+        medicinePack: {
+          medicineId: { in: medicineIds },
+          medicine: { status: CatalogStatus.PUBLISHED, searchVisible: true },
+        },
+      },
+      select: { organizationId: true, medicinePack: { select: { medicineId: true } } },
+    });
+    const wholesalers = new Map<string, Set<string>>();
+    for (const row of rows) {
+      const current = wholesalers.get(row.medicinePack.medicineId) ?? new Set<string>();
+      current.add(row.organizationId);
+      wholesalers.set(row.medicinePack.medicineId, current);
+    }
+    return new Map([...wholesalers].map(([medicineId, organizations]) => [medicineId, organizations.size]));
+  }
+
+  async publishSubmittedMedicine(
+    tx: Tx,
+    actorUserId: string,
+    input: SubmittedMedicineInput,
+  ): Promise<{ medicineId: string; linked: boolean }> {
+    await this.assertPlatformAdmin(tx, actorUserId);
+    const displayName = collapse(input.displayName);
+    const normalized = this.readName(displayName);
+    const existing = await tx.medicine.findUnique({ where: { normalizedDisplayName: normalized } });
+    if (existing) {
+      if (existing.status !== CatalogStatus.PUBLISHED) {
+        throw new DuplicateCatalogRecordError();
+      }
+      await this.audit(tx, actorUserId, "medicine.link_submission", "medicine", existing.id);
+      return { medicineId: existing.id, linked: true };
+    }
+    const genericName = collapse(input.genericName ?? displayName);
+    const medicine = await tx.medicine.create({
+      data: {
+        displayName,
+        normalizedDisplayName: normalized,
+        brandName: optionalText(input.brandName),
+        genericName,
+        dosageForm: collapse(input.dosageForm),
+        presentation: optionalText(input.presentation),
+        status: CatalogStatus.DRAFT,
+        searchVisible: false,
+        sourceLabel: "distributor_submission",
+        sourceReference: input.submissionId,
+        searchText: "",
+      },
+    });
+    for (const line of input.ingredients) {
+      const ingredient = await this.ensureIngredient(tx, actorUserId, line.ingredientName, line.kind);
+      await tx.medicineComposition.create({
+        data: {
+          medicineId: medicine.id,
+          ingredientId: ingredient.id,
+          strengthValue: line.strengthValue,
+          strengthUnit: line.strengthUnit as StrengthUnit,
+          basis: line.basis,
+          sequence: line.sequence,
+        },
+      });
+    }
+    for (const pack of input.packs) {
+      await tx.medicinePack.create({
+        data: {
+          medicineId: medicine.id,
+          description: collapse(pack.description),
+          quantity: pack.quantity,
+          unit: pack.unit as PackUnit,
+        },
+      });
+    }
+    if (input.manufacturerName) {
+      const manufacturer = await this.ensureManufacturer(tx, actorUserId, input.manufacturerName);
+      await tx.medicineManufacturer.create({
+        data: {
+          medicineId: medicine.id,
+          manufacturerId: manufacturer.id,
+          role: MedicineCompanyRole.MANUFACTURER,
+        },
+      });
+    }
+    if (input.marketerName) {
+      const marketer = await this.ensureManufacturer(tx, actorUserId, input.marketerName);
+      await tx.medicineManufacturer.create({
+        data: {
+          medicineId: medicine.id,
+          manufacturerId: marketer.id,
+          role: MedicineCompanyRole.MARKETER,
+        },
+      });
+    }
+    await this.refreshSearchText(tx, medicine.id);
+    await tx.medicine.update({
+      where: { id: medicine.id },
+      data: { status: CatalogStatus.PUBLISHED, searchVisible: true },
+    });
+    await this.audit(tx, actorUserId, "medicine.create", "medicine", medicine.id);
+    await this.audit(tx, actorUserId, "medicine.publish", "medicine", medicine.id);
+    return { medicineId: medicine.id, linked: false };
+  }
+
+  private async ensureIngredient(
+    tx: Tx,
+    actorUserId: string,
+    name: string,
+    kind: "ACTIVE" | "SALT",
+  ): Promise<{ id: string }> {
+    const canonicalName = collapse(name);
+    const normalizedName = this.readName(canonicalName);
+    const existing = await tx.ingredient.findUnique({ where: { normalizedName } });
+    if (existing) {
+      return existing;
+    }
+    try {
+      const created = await tx.ingredient.create({
+        data: { canonicalName, normalizedName, kind: kind as IngredientKind },
+      });
+      await this.audit(tx, actorUserId, "ingredient.create", "ingredient", created.id);
+      return created;
+    } catch (error) {
+      if (prismaErrorCode(error) !== "P2002") {
+        throw error;
+      }
+      const raced = await tx.ingredient.findUnique({ where: { normalizedName } });
+      if (!raced) {
+        throw error;
+      }
+      return raced;
+    }
+  }
+
+  private async ensureManufacturer(tx: Tx, actorUserId: string, name: string): Promise<{ id: string }> {
+    const canonicalName = collapse(name);
+    const normalizedName = this.readName(canonicalName);
+    const existing = await tx.manufacturer.findUnique({ where: { normalizedName } });
+    if (existing) {
+      return existing;
+    }
+    try {
+      const created = await tx.manufacturer.create({
+        data: { canonicalName, normalizedName },
+      });
+      await this.audit(tx, actorUserId, "manufacturer.create", "manufacturer", created.id);
+      return created;
+    } catch (error) {
+      if (prismaErrorCode(error) !== "P2002") {
+        throw error;
+      }
+      const raced = await tx.manufacturer.findUnique({ where: { normalizedName } });
+      if (!raced) {
+        throw error;
+      }
+      return raced;
+    }
   }
 
   private async assertPlatformAdmin(tx: Tx, actorUserId: string): Promise<void> {

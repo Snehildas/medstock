@@ -17,6 +17,8 @@ erDiagram
 
 There is one listing per distributor organization and medicine pack, including paused, archived, and suspended rows. Archiving does not free that pair for a second listing.
 
+A distributor owner can store a proprietor name, landline, and mobile number on the organization profile. Those values are not copied onto each listing. Phone numbers are normalized to `+91` national form. Landline and mobile are each optional, and publishing the profile requires at least one valid number. Distributor staff can read the profile and cannot change it. Another distributor organization cannot read or edit it. Retailers and platform admins read published contact details from the wholesaler directory. Unpublished numbers stay off that directory, which then shows that contact details were not provided. Ordinary request logs record the actor and organization only.
+
 Retailer discovery returns a listing only when all of these are true:
 
 - listing status is `ACTIVE`
@@ -33,7 +35,7 @@ A suspended distributor organization cannot change its listings.
 
 ## Price, stock, and freshness
 
-The unit price is indicative. It is not a confirmed quote. Currency is `INR` only. The price is a decimal and may be zero. The minimum order quantity must be greater than zero.
+The unit price is indicative. It is not a confirmed quote. Currency is `INR` only. The price is a decimal and may be zero. The minimum order quantity must be a whole number of packs and greater than zero.
 
 Stock status is `IN_STOCK`, `LOW_STOCK`, `OUT_OF_STOCK`, or `UNKNOWN`. A price or an active listing does not imply stock. Optional `availableQuantity` is the distributor's quantity on hand. It is not `MedicinePack.quantity`, and it does not change the stock status.
 

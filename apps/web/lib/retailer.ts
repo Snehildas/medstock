@@ -25,6 +25,44 @@ export function catalogSearchState(input: {
   return input.total === 0 ? "empty" : "results";
 }
 
+export function medicineSearchPresentation(medicine: {
+  id: string;
+  displayName: string;
+  brandName: string | null;
+  dosageForm: string;
+  compositions: Array<{ ingredientName: string; strengthValue: string; strengthUnit: string }>;
+  eligibleWholesalerCount: number;
+}): {
+  name: string;
+  salts: string | null;
+  strength: string;
+  wholesalerHref: string;
+  wholesalerCount: number;
+} {
+  const salts = medicine.compositions.map((line) => line.ingredientName.trim()).filter((name) => name.length > 0);
+  const strengths = medicine.compositions
+    .filter((line) => line.strengthValue.trim().length > 0 && line.strengthUnit.trim().length > 0)
+    .map((line) => `${line.strengthValue} ${line.strengthUnit}`);
+  return {
+    name: medicine.displayName,
+    salts: salts.length > 0 ? salts.join(" + ") : null,
+    strength: strengths.length > 0 ? `${strengths.join(" + ")} · ${medicine.dosageForm}` : medicine.dosageForm,
+    wholesalerHref: `/app/discover/medicines/${medicine.id}/wholesalers`,
+    wholesalerCount: medicine.eligibleWholesalerCount,
+  };
+}
+
+export function wholesalerDirectoryState(total: number): "empty" | "results" {
+  return total === 0 ? "empty" : "results";
+}
+
+export function phoneHref(number: string | null): string | null {
+  if (number == null || number.trim().length === 0) {
+    return null;
+  }
+  return `tel:${number}`;
+}
+
 export function searchResultView(medicine: {
   displayName: string;
   dosageForm: string;

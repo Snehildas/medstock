@@ -1,4 +1,5 @@
 import { Suspense, type ReactNode } from "react";
+import { demoModeEnabled } from "@medstock/shared-types";
 import { loadAccountState } from "@/lib/account";
 import { localPreviewAllowed } from "@/lib/preview-mode";
 import { AppShell } from "@/components/app-shell";
@@ -14,7 +15,12 @@ export default function WorkspaceLayout({ children }: { children: ReactNode }) {
 async function WorkspaceFrame({ children }: { children: ReactNode }) {
   const account = await loadAccountState();
   return (
-    <AppShell account={account} notice={null} preview={localPreviewAllowed(process.env)}>
+    <AppShell
+      account={account}
+      notice={null}
+      preview={localPreviewAllowed(process.env)}
+      demo={demoModeEnabled(process.env)}
+    >
       {children}
     </AppShell>
   );

@@ -14,8 +14,11 @@ import {
 } from "@medstock/database";
 import type {
   CreateListingRequest,
+  DistributorProfile,
+  DistributorProfileRequest,
   ListingSearchQuery,
   UpdateListingRequest,
+  WholesalerQuery,
 } from "@medstock/shared-types";
 import {
   DuplicateListingError,
@@ -25,6 +28,7 @@ import {
   OrganizationIneligibleError,
   OrganizationNotDistributorError,
   PackNotFoundError,
+  ProfileContactRequiredError,
 } from "../identity/domain-error.js";
 import { prismaErrorCode } from "../identity/prisma-error.js";
 import { classifyFreshness, type ListingFreshness } from "./freshness.js";
@@ -56,6 +60,21 @@ const managerRoles = new Set<MembershipRole>([
   MembershipRole.DISTRIBUTOR_OWNER,
   MembershipRole.DISTRIBUTOR_STAFF,
 ]);
+
+const wholesalerInclude = {
+  organization: {
+    select: {
+      id: true,
+      name: true,
+      type: true,
+      status: true,
+      distributorProfile: true,
+    },
+  },
+  medicinePack: listingInclude.medicinePack,
+} satisfies Prisma.DistributorListingInclude;
+
+export type WholesalerRecord = Prisma.DistributorListingGetPayload<{ include: typeof wholesalerInclude }>;
 
 const retailerRoles = new Set<MembershipRole>([
   MembershipRole.RETAILER_OWNER,
@@ -329,6 +348,124 @@ export class ListingService {
     return { items, page: query.page, pageSize: query.pageSize, total };
   }
 
+  async listWholesalers(actorUserId: string, medicineId: string, query: WholesalerQuery) {
+    await this.requireReader(actorUserId);
+    const medicine = await this.prisma.medicine.findUnique({ where: { id: medicineId } });
+    if (!medicine || medicine.status !== CatalogStatus.PUBLISHED || !medicine.searchVisible) {
+      throw new ListingNotFoundError();
+    }
+    const text = query.q.trim();
+    const where: Prisma.DistributorListingWhereInput = {
+      ...eligibleListingWhere(medicineId),
+      ...(query.medicinePackId ? { medicinePackId: query.medicinePackId } : {}),
+      ...(query.stockStatus ? { stockStatus: query.stockStatus as StockStatus } : {}),
+      ...(query.minPrice || query.maxPrice
+        ? {
+            unitPrice: {
+              ...(query.minPrice ? { gte: query.minPrice } : {}),
+              ...(query.maxPrice ? { lte: query.maxPrice } : {}),
+            },
+          }
+        : {}),
+      ...(text.length > 0
+        ? {
+            OR: [
+              { organization: { name: { contains: text, mode: "insensitive" } } },
+              { medicinePack: { description: { contains: text, mode: "insensitive" } } },
+              { medicinePack: { medicine: { displayName: { contains: text, mode: "insensitive" } } } },
+            ],
+          }
+        : {}),
+    };
+    const items = await this.prisma.distributorListing.findMany({
+      where,
+      include: wholesalerInclude,
+      orderBy: [{ organization: { name: "asc" } }, { unitPrice: "asc" }, { id: "asc" }],
+      skip: (query.page - 1) * query.pageSize,
+      take: query.pageSize,
+    });
+    const total = await this.prisma.distributorListing.count({ where });
+    const organizations = await this.prisma.distributorListing.findMany({
+      where,
+      select: { organizationId: true },
+      distinct: ["organizationId"],
+    });
+    return {
+      medicineId,
+      items,
+      page: query.page,
+      pageSize: query.pageSize,
+      total,
+      eligibleWholesalerCount: organizations.length,
+    };
+  }
+
+  async getProfile(actorUserId: string, organizationId: string): Promise<DistributorProfile> {
+    const admin = await this.findPlatformAdmin(this.prisma, actorUserId);
+    if (!admin) {
+      await this.requireManager(this.prisma, actorUserId, organizationId);
+    } else {
+      this.logger.log(`platform_admin.distributor_profile.read actor=${actorUserId} organization=${organizationId}`);
+    }
+    return this.profileResponse(organizationId);
+  }
+
+  async updateProfile(
+    actorUserId: string,
+    organizationId: string,
+    input: DistributorProfileRequest,
+  ): Promise<DistributorProfile> {
+    return this.prisma.$transaction(async (tx) => {
+      const membership = await this.requireManager(tx, actorUserId, organizationId);
+      if (membership.role !== MembershipRole.DISTRIBUTOR_OWNER) {
+        throw new ListingForbiddenError();
+      }
+      if (input.publish && input.landlineNumber == null && input.mobileNumber == null) {
+        throw new ProfileContactRequiredError();
+      }
+      const existing = await tx.distributorProfile.findUnique({ where: { organizationId } });
+      const publishedAt = input.publish ? existing?.publishedAt ?? new Date() : null;
+      await tx.distributorProfile.upsert({
+        where: { organizationId },
+        create: {
+          organizationId,
+          proprietorName: input.proprietorName,
+          landlineNumber: input.landlineNumber,
+          mobileNumber: input.mobileNumber,
+          publishedAt,
+        },
+        update: {
+          proprietorName: input.proprietorName,
+          landlineNumber: input.landlineNumber,
+          mobileNumber: input.mobileNumber,
+          publishedAt,
+        },
+      });
+      await tx.distributorProfileAuditEvent.create({
+        data: {
+          actorUserId,
+          organizationId,
+          action: input.publish ? "profile.publish" : "profile.update",
+        },
+      });
+      this.logger.log(
+        `distributor_profile.write actor=${actorUserId} organization=${organizationId} publish=${input.publish}`,
+      );
+      return this.profileResponse(organizationId, tx);
+    });
+  }
+
+  private async profileResponse(organizationId: string, tx: Tx | PrismaClient = this.prisma): Promise<DistributorProfile> {
+    const profile = await tx.distributorProfile.findUnique({ where: { organizationId } });
+    return {
+      organizationId,
+      proprietorName: profile?.proprietorName ?? null,
+      landlineNumber: profile?.landlineNumber ?? null,
+      mobileNumber: profile?.mobileNumber ?? null,
+      published: profile?.publishedAt != null,
+    };
+  }
+
   private async transition(
     actorUserId: string,
     listingId: string,
@@ -429,6 +566,36 @@ export class ListingService {
       data: { actorUserId, organizationId, listingId, action },
     });
   }
+}
+
+function eligibleListingWhere(medicineId: string): Prisma.DistributorListingWhereInput {
+  return {
+    status: ListingStatus.ACTIVE,
+    organization: { type: OrganizationType.DISTRIBUTOR, status: OrganizationStatus.ACTIVE },
+    medicinePack: {
+      medicineId,
+      medicine: { status: CatalogStatus.PUBLISHED, searchVisible: true },
+    },
+  };
+}
+
+export function publishedContact(listing: WholesalerRecord): {
+  proprietorName: string;
+  landlineNumber: string | null;
+  mobileNumber: string | null;
+} | null {
+  const profile = listing.organization.distributorProfile;
+  if (!profile?.publishedAt) {
+    return null;
+  }
+  if (profile.landlineNumber == null && profile.mobileNumber == null) {
+    return null;
+  }
+  return {
+    proprietorName: profile.proprietorName,
+    landlineNumber: profile.landlineNumber,
+    mobileNumber: profile.mobileNumber,
+  };
 }
 
 export function isDiscoverable(listing: ListingRecord): boolean {

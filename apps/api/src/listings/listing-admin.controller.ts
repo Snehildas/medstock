@@ -2,8 +2,10 @@ import { Controller, Get, Param, Post, Query, UseGuards } from "@nestjs/common";
 import {
   distributorListingPageSchema,
   distributorListingSchema,
+  distributorProfileSchema,
   type DistributorListingPage,
   type DistributorListingResponse,
+  type DistributorProfile,
 } from "@medstock/shared-types";
 import { z } from "zod";
 import { CurrentIdentity } from "../identity/current-identity.decorator.js";
@@ -48,5 +50,23 @@ export class ListingAdminController {
     const actor = await this.identityService.provision(identity);
     const listing = await this.listings.suspend(actor.id, listingId);
     return distributorListingSchema.parse(toDistributorListing(listing));
+  }
+}
+
+@Controller("admin/distributor-profiles")
+@UseGuards(IdentityGuard)
+export class DistributorProfileAdminController {
+  constructor(
+    private readonly identityService: IdentityService,
+    private readonly listings: ListingService,
+  ) {}
+
+  @Get(":organizationId")
+  async get(
+    @CurrentIdentity() identity: VerifiedIdentity,
+    @Param("organizationId", listingIdPipe) organizationId: string,
+  ): Promise<DistributorProfile> {
+    const actor = await this.identityService.provision(identity);
+    return distributorProfileSchema.parse(await this.listings.getProfile(actor.id, organizationId));
   }
 }

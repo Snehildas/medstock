@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import Link from "next/link";
 import { listingImportSchema } from "@medstock/shared-types";
 import { loadAccountState } from "@/lib/account";
@@ -20,7 +21,21 @@ const notices: Record<string, string> = {
   rejected: "That import action was not accepted.",
 };
 
-export default async function ImportDetailPage({
+export default function ImportDetailPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ importId: string }>;
+  searchParams: Promise<{ notice?: string | string[] }>;
+}) {
+  return (
+    <Suspense fallback={<p className="text-sm text-muted-foreground">Loading import preview…</p>}>
+      <ImportDetailContent params={params} searchParams={searchParams} />
+    </Suspense>
+  );
+}
+
+async function ImportDetailContent({
   params,
   searchParams,
 }: {

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { distributorListingPageSchema } from "@medstock/shared-types";
+import { distributorListingPageSchema, distributorProfileSchema } from "@medstock/shared-types";
 import { DataTable, tdClass, thClass } from "@/components/data-table";
 import { EmptyState, PageHeader, Pager } from "@/components/page-header";
 import { FreshnessBadge, ListingBadge, StockBadge } from "@/components/status-badge";
@@ -9,6 +9,7 @@ import { loadAccountState } from "@/lib/account";
 import { distributorApi } from "@/lib/distributor-api";
 import { distributorAccess, listingQuery } from "@/lib/distributor";
 import { listingStatusLabel, stockStatusLabel } from "@/lib/labels";
+import { DistributorProfileForm } from "@/components/distributor-profile-form";
 import { DistributorRequired, RequestProblem } from "@/components/workspace-states";
 
 const listingStatuses = ["ACTIVE", "PAUSED", "ARCHIVED", "SUSPENDED"] as const;
@@ -64,14 +65,18 @@ export default async function ListingsPage({
         actions={
           <>
             <Button asChild>
-              <Link href="/app/listings/new">Create listing</Link>
+              <Link href="/app/listings/new">Add Existing Medicine</Link>
+            </Button>
+            <Button asChild>
+              <Link href="/app/catalog/submit">+ Add New Medicine</Link>
             </Button>
             <Button asChild variant="outline">
-              <Link href="/app/imports">Import file</Link>
+              <Link href="/app/imports">Upload inventory</Link>
             </Button>
           </>
         }
       />
+      <ProfileCard organizationId={membership.organizationId} canEdit={membership.role === "DISTRIBUTOR_OWNER"} />
       <form method="get" className="grid gap-3 rounded-lg border bg-card p-4 md:grid-cols-4">
         <label className={`${labelClass} md:col-span-2`}>
           Medicine or pack
@@ -160,6 +165,20 @@ export default async function ListingsPage({
         nextHref={result.data.page < lastPage ? filterHref({ q, status, stockStatus, page: result.data.page + 1 }) : null}
       />
     </section>
+  );
+}
+
+async function ProfileCard({ organizationId, canEdit }: { organizationId: string; canEdit: boolean }) {
+  const profile = await distributorApi(
+    `/distributor/profile?organizationId=${organizationId}`,
+    distributorProfileSchema,
+    { returnTo: "/app/listings" },
+  );
+  if (!profile.ok) {
+    return <RequestProblem title="Wholesaler profile unavailable" message={profile.message} />;
+  }
+  return (
+    <DistributorProfileForm organizationId={organizationId} profile={profile.data} canEdit={canEdit} />
   );
 }
 

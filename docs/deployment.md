@@ -2,6 +2,8 @@
 
 This is the configuration and validation reference for a staging environment. Passing the automated checks does not make MedStock production-ready. A real Cognito user pool, a staging database, and the manual flow below are still required. This repository does not create AWS resources.
 
+The free interactive demo is a separate deployment. It uses Render free web services and a Neon database named `medstock_demo`, with `MEDSTOCK_DEMO_MODE=true` and no Cognito variables. Steps, limits, and the manual reset command are in `docs/demo-deployment.md`. That mode must stay off for this Cognito staging environment.
+
 Redis, BullMQ, and S3 are not required. Manual imports run in the API process. `infrastructure/docker/docker-compose.yml` still starts Redis for later unattended imports. Staging can omit it.
 
 ## Runtime variables
@@ -47,7 +49,34 @@ Create the user pool and app client manually. Use the authorization-code grant a
 
 The web app sends `state` and a PKCE S256 challenge. It does not send an OIDC nonce because it does not accept ID tokens. The callback rejects a missing or mismatched `state` before it exchanges the code. The token request sends the code verifier and the callback URL derived from `WEB_ORIGIN`.
 
-Refresh uses the refresh token. When Cognito returns a new refresh token, the cookie stores that value. A failed refresh, or a second refresh within 60 seconds, clears the session and returns to `/sign-in?reason=expired`. The organization cookie is kept and is accepted again only when `/identity/me` lists that organization as an active membership. Enable refresh-token rotation in the user pool if the pool should invalidate the previous refresh token. That pool setting was not exercised from this repository.
+Automated tests, which do not need AWS credentials, cover a valid access token, an invalid signature, the wrong issuer, the wrong client id, the wrong `token_use`, expiry, a missing email, an unverified email, the same access token after the local user is disabled, an invited membership denied listing access, session expiry, a renewed session inside the retry window, a shared concurrent refresh, refresh failure, a network failure that keeps the session, and sign-out cookie deletion. They use a local signing key. They do not prove that a real user pool is configured.
+
+Create the pool before the manual checks. These steps are prerequisites, not test results:
+
+1. Create a user pool in `COGNITO_REGION`. Leave the implicit grant disabled.
+2. Create a public app client with the authorization-code grant and PKCE S256. Do not create a client secret.
+3. Set the callback URL to `$WEB_ORIGIN/api/auth/callback` and the sign-out URL to `$WEB_ORIGIN/sign-in`.
+4. Set the hosted UI domain and store only its hostname in `COGNITO_DOMAIN`.
+5. Add token customization so the access token includes `email` and `email_verified`. A default access token omits both and is rejected.
+6. Put `COGNITO_REGION`, `COGNITO_USER_POOL_ID`, `COGNITO_CLIENT_ID`, `COGNITO_DOMAIN`, `WEB_ORIGIN`, `API_ORIGIN`, and `SESSION_SECRET` in the task environment. Leave `COGNITO_CLIENT_SECRET` empty. Set `NODE_ENV=production` and `AUTH_DEV_MODE=false`.
+7. Assign retailer, distributor, or platform-admin membership in MedStock. Cognito groups are not roles. First login creates an invited user and grants no role.
+
+The twelve checks below require that real user pool. Do not record tokens or cookies in the test notes.
+
+1. Successful sign-in through `/sign-in`. Confirm `medstock_session` is HttpOnly and `/identity/me` returns only PostgreSQL memberships.
+2. Incorrect hosted-UI credentials stay on the Cognito error page and do not create a MedStock session.
+3. An unverified email is rejected by the API.
+4. An access token without an email claim is rejected by the API.
+5. A tampered or wrong-pool access token is rejected.
+6. An expired access token causes one refresh. If the refresh token is also expired, the user returns to `/sign-in?reason=expired`.
+7. A successful refresh issues a new access token and the workspace stays signed in.
+8. With refresh-token rotation enabled, the new refresh token is stored and the previous one no longer works on its own.
+9. Reusing a rotated refresh token does not leave two valid sessions. One web process shares concurrent refresh calls. Two web tasks are not coordinated.
+10. Sign-out clears the MedStock cookies and ends the hosted UI session.
+11. Disable the local user while the Cognito access token is still valid. The next API call is rejected. Do not rely on a new login for this check.
+12. Set the membership to invited or suspended. Listing, import, and enquiry actions are rejected. `/identity/me` may still load so the empty workspace can be shown.
+
+Refresh uses the refresh token. When Cognito returns a new refresh token, the cookie stores that value. A rejected refresh token clears the session and returns to `/sign-in?reason=expired`. A second refresh inside 60 seconds does not call Cognito when the access token in the cookie is still unexpired. It signs the user out only when that access token is still expired. Concurrent refreshes in one web process share one token request. A network failure does not clear the session. The organization cookie is kept after a failed refresh and is accepted again only when `/identity/me` lists that organization as an active membership. Enable refresh-token rotation in the user pool if the pool should invalidate the previous refresh token. Rotation across more than one web task is not coordinated. That pool setting was not exercised from this repository.
 
 ## Session cookie
 
@@ -87,7 +116,7 @@ Foreign keys use `ON DELETE RESTRICT` for users, organizations, listings, import
 
 ## Containers and CI
 
-`apps/api/Dockerfile` and `apps/web/Dockerfile` build from the repository root with Node 26.13.0. They are not started by the local Compose file. Build them only when a staging host is ready:
+`apps/api/Dockerfile` and `apps/web/Dockerfile` build from the repository root with Node 26.13.0. The runtime stage keeps the production deploy and runs as the unprivileged `medstock` user. They take no secret build arguments. Secret names, the execution role, and the task role are described in `docs/security.md`. They are not started by the local Compose file. Build them only when a staging host is ready:
 
 ```text
 docker build -f apps/api/Dockerfile -t medstock-api .
@@ -127,4 +156,4 @@ After deploy, call `GET /health` and `GET /health/ready` from the load balancer.
 
 ## What remains unverified
 
-Live Cognito sign-in, token refresh against Cognito, hosted UI logout, refresh-token rotation in a real pool, TLS termination, the container images on a staging host, and restoring a database snapshot have not been run. Do not treat a green local test run as that evidence.
+Live Cognito sign-in, token refresh against Cognito, hosted UI logout, refresh-token rotation in a real pool, a disabled user on a live token, TLS termination, the container images on a staging host, and restoring a database snapshot have not been run. The local JWT tests do not replace those checks. Do not treat a green local test run as evidence that a user pool is ready.

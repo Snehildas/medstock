@@ -3,9 +3,14 @@ import { apiErrorSchema, listingImportSchema } from "@medstock/shared-types";
 import { z } from "zod";
 import { readApiSession } from "@/lib/account";
 import { localPreviewAllowed } from "@/lib/preview-mode";
+import { limitWebRequest } from "@/lib/rate-limit";
 import { sameOriginMutation } from "@/lib/request-origin";
 
 export async function POST(request: NextRequest) {
+  const limited = limitWebRequest(request, "upload");
+  if (limited) {
+    return limited;
+  }
   if (
     !sameOriginMutation({
       method: request.method,

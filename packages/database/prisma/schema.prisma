@@ -60,6 +60,10 @@ model User {
   enquiryAuditEvents  ProcurementEnquiryAuditEvent[]
   listingImportAudits ListingImportAuditEvent[]
   listingImportsUploaded ListingImport[] @relation("ListingImportUploader")
+  distributorProfileAudits DistributorProfileAuditEvent[]
+  medicineSubmissionsSubmitted MedicineSubmission[] @relation("SubmissionAuthor")
+  medicineSubmissionsReviewed  MedicineSubmission[] @relation("SubmissionReviewer")
+  medicineSubmissionAudits     MedicineSubmissionAuditEvent[]
 
   @@map("users")
 }
@@ -82,6 +86,10 @@ model Organization {
   enquiryAuditsAsDistributor ProcurementEnquiryAuditEvent[] @relation("EnquiryAuditDistributor")
   listingImports            ListingImport[]
   listingImportAudits       ListingImportAuditEvent[]
+  distributorProfile        DistributorProfile?
+  distributorProfileAudits  DistributorProfileAuditEvent[]
+  medicineSubmissions       MedicineSubmission[]
+  medicineSubmissionAudits MedicineSubmissionAuditEvent[]
 
   @@map("organizations")
 }
@@ -215,6 +223,7 @@ model Medicine {
   compositions MedicineComposition[]
   packs        MedicinePack[]
   companies    MedicineManufacturer[]
+  approvedSubmissions MedicineSubmission[]
 
   @@index([status, searchVisible])
   @@index([searchText(ops: raw("gin_trgm_ops"))], type: Gin, map: "medicines_search_text_trgm_idx")
@@ -290,6 +299,100 @@ model CatalogAuditEvent {
   @@map("catalog_audit_events")
 }
 
+enum MedicineSubmissionStatus {
+  PENDING_REVIEW
+  APPROVED
+  REJECTED
+}
+
+model MedicineSubmission {
+  id                     String                   @id @default(uuid()) @db.Uuid
+  organizationId         String                   @map("organization_id") @db.Uuid
+  submittedByUserId      String                   @map("submitted_by_user_id") @db.Uuid
+  status                 MedicineSubmissionStatus @default(PENDING_REVIEW)
+  displayName            String                   @map("display_name")
+  normalizedDisplayName  String                   @map("normalized_display_name")
+  brandName              String?                  @map("brand_name")
+  genericName            String?                  @map("generic_name")
+  dosageForm             String                   @map("dosage_form")
+  presentation           String?
+  manufacturerName       String?                  @map("manufacturer_name")
+  marketerName           String?                  @map("marketer_name")
+  indicativeUnitPrice    Decimal?                 @map("indicative_unit_price") @db.Decimal(12, 2)
+  minimumOrderQuantity   Decimal?                 @map("minimum_order_quantity") @db.Decimal(18, 6)
+  stockStatus            StockStatus?             @map("stock_status")
+  availableQuantity      Decimal?                 @map("available_quantity") @db.Decimal(18, 6)
+  sourceNote             String?                  @map("source_note")
+  reviewReason           String?                  @map("review_reason")
+  reviewedByUserId       String?                  @map("reviewed_by_user_id") @db.Uuid
+  reviewedAt             DateTime?                @map("reviewed_at")
+  approvedMedicineId     String?                  @map("approved_medicine_id") @db.Uuid
+  createdAt              DateTime                 @default(now()) @map("created_at")
+  updatedAt              DateTime                 @updatedAt @map("updated_at")
+
+  organization     Organization                     @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  submittedBy      User                             @relation("SubmissionAuthor", fields: [submittedByUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  reviewedBy       User?                            @relation("SubmissionReviewer", fields: [reviewedByUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  approvedMedicine Medicine?                        @relation(fields: [approvedMedicineId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  ingredients      MedicineSubmissionIngredient[]
+  packs            MedicineSubmissionPack[]
+  audits           MedicineSubmissionAuditEvent[]
+
+  @@index([organizationId, status])
+  @@index([status, createdAt])
+  @@index([normalizedDisplayName])
+  @@map("medicine_submissions")
+}
+
+model MedicineSubmissionIngredient {
+  id             String         @id @default(uuid()) @db.Uuid
+  submissionId   String         @map("submission_id") @db.Uuid
+  ingredientName String         @map("ingredient_name")
+  normalizedName String         @map("normalized_name")
+  kind           IngredientKind
+  strengthValue  Decimal        @map("strength_value") @db.Decimal(18, 6)
+  strengthUnit   StrengthUnit   @map("strength_unit")
+  basis          String?
+  sequence       Int
+
+  submission MedicineSubmission @relation(fields: [submissionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@unique([submissionId, sequence])
+  @@unique([submissionId, normalizedName])
+  @@map("medicine_submission_ingredients")
+}
+
+model MedicineSubmissionPack {
+  id           String   @id @default(uuid()) @db.Uuid
+  submissionId String   @map("submission_id") @db.Uuid
+  description  String
+  quantity     Decimal  @db.Decimal(18, 6)
+  unit         PackUnit
+
+  submission MedicineSubmission @relation(fields: [submissionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@unique([submissionId, description])
+  @@map("medicine_submission_packs")
+}
+
+model MedicineSubmissionAuditEvent {
+  id             String   @id @default(uuid()) @db.Uuid
+  actorUserId    String   @map("actor_user_id") @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  submissionId   String   @map("submission_id") @db.Uuid
+  action         String
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  actor        User                @relation(fields: [actorUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  organization Organization        @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  submission   MedicineSubmission  @relation(fields: [submissionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([submissionId])
+  @@index([organizationId])
+  @@index([actorUserId])
+  @@map("medicine_submission_audit_events")
+}
+
 enum ListingStatus {
   ACTIVE
   PAUSED
@@ -315,6 +418,35 @@ enum ListingSource {
   SFTP_IMPORT
   ERP_INTEGRATION
   POS_INTEGRATION
+}
+
+model DistributorProfile {
+  organizationId String    @id @map("organization_id") @db.Uuid
+  proprietorName String    @map("proprietor_name")
+  landlineNumber String?   @map("landline_number")
+  mobileNumber   String?   @map("mobile_number")
+  publishedAt    DateTime? @map("published_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@map("distributor_profiles")
+}
+
+model DistributorProfileAuditEvent {
+  id             String   @id @default(uuid()) @db.Uuid
+  actorUserId    String   @map("actor_user_id") @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  action         String
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  actor        User         @relation(fields: [actorUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([organizationId])
+  @@index([actorUserId])
+  @@map("distributor_profile_audit_events")
 }
 
 model DistributorListing {

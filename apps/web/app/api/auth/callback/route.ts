@@ -11,6 +11,7 @@ import {
   sessionCookieMaxAge,
   type PkcePayload,
 } from "@/lib/session";
+import { limitWebRequest } from "@/lib/rate-limit";
 import { callbackUrl, loadWebAuthConfig } from "@/lib/web-auth-config";
 
 const tokenSchema = z.object({
@@ -20,6 +21,10 @@ const tokenSchema = z.object({
 });
 
 export async function GET(request: NextRequest) {
+  const limited = limitWebRequest(request, "auth");
+  if (limited) {
+    return limited;
+  }
   const config = loadWebAuthConfig(process.env);
   if (!config) {
     return NextResponse.redirect(new URL("/sign-in?reason=unconfigured", request.url));

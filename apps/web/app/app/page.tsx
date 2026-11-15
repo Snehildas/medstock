@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { enquiryPageSchema, distributorListingPageSchema, listingImportPageSchema } from "@medstock/shared-types";
 import { Button } from "@/components/ui/button";
 import { EmptyState, Metric, PageHeader } from "@/components/page-header";
@@ -8,6 +9,7 @@ import { distributorApi } from "@/lib/distributor-api";
 import { distributorAccess } from "@/lib/distributor";
 import { organizationTypeLabel, roleLabel } from "@/lib/labels";
 import { enquiryListTarget, retailerAccess } from "@/lib/retailer";
+import { workspaceLanding } from "@/lib/organization";
 
 export default async function WorkspacePage({
   searchParams,
@@ -49,6 +51,10 @@ export default async function WorkspacePage({
   }
 
   const membership = account.organization.membership;
+  const landing = workspaceLanding(membership.organization.type);
+  if (landing !== "/app") {
+    redirect(landing);
+  }
   const retailer = retailerAccess(membership.organization.type) === "allowed";
   const distributor = distributorAccess(membership.organization.type) === "allowed";
   const snapshot = retailer || distributor ? await workspaceSnapshot(membership.organizationId, retailer ? "retailer" : "distributor") : null;

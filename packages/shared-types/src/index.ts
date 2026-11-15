@@ -1,4 +1,7 @@
 import { z } from "zod";
+import { normalizeContactNumber } from "./phone.js";
+
+export { normalizeContactNumber } from "./phone.js";
 
 export const healthResponseSchema = z.object({
   status: z.literal("ok"),
@@ -148,6 +151,136 @@ export const publishMedicineRequestSchema = z
   })
   .strict();
 
+export const medicineSubmissionStatusSchema = z.enum(["PENDING_REVIEW", "APPROVED", "REJECTED"]);
+
+const submissionIngredientSchema = z
+  .object({
+    ingredientName: catalogNameSchema,
+    kind: ingredientKindSchema,
+    strengthValue: catalogDecimalSchema,
+    strengthUnit: strengthUnitSchema,
+    basis: z.string().trim().min(1).max(80).nullable().optional(),
+  })
+  .strict();
+
+const submissionPackSchema = z
+  .object({
+    description: catalogNameSchema,
+    quantity: catalogDecimalSchema,
+    unit: packUnitSchema,
+  })
+  .strict();
+
+export const createMedicineSubmissionSchema = z
+  .object({
+    displayName: catalogNameSchema,
+    brandName: catalogNameSchema.nullable().optional(),
+    genericName: catalogNameSchema.nullable().optional(),
+    dosageForm: catalogNameSchema,
+    presentation: catalogNameSchema.nullable().optional(),
+    manufacturerName: catalogNameSchema.nullable().optional(),
+    marketerName: catalogNameSchema.nullable().optional(),
+    indicativeUnitPrice: z.string().regex(/^(?:0|[1-9]\d*)(?:\.\d{1,2})?$/),
+    minimumOrderQuantity: z.string().regex(/^[1-9]\d*$/),
+    stockStatus: z.enum(["IN_STOCK", "LOW_STOCK", "OUT_OF_STOCK", "UNKNOWN"]),
+    availableQuantity: z
+      .string()
+      .regex(/^(?:0|[1-9]\d*)(?:\.\d{1,6})?$/)
+      .refine((value) => Number(value) >= 0)
+      .nullable()
+      .optional(),
+    sourceNote: z.string().trim().min(1).max(200).nullable().optional(),
+    ingredients: z.array(submissionIngredientSchema).min(1).max(12),
+    packs: z.array(submissionPackSchema).min(1).max(12),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    const ingredientNames = value.ingredients.map((line) => line.ingredientName.trim().toLowerCase().replace(/\s+/g, " "));
+    if (new Set(ingredientNames).size !== ingredientNames.length) {
+      context.addIssue({
+        code: "custom",
+        path: ["ingredients"],
+        message: "Each ingredient name must stay separate. Enter a different name instead of repeating one.",
+      });
+    }
+    const descriptions = value.packs.map((pack) => pack.description.trim().toLowerCase().replace(/\s+/g, " "));
+    if (new Set(descriptions).size !== descriptions.length) {
+      context.addIssue({
+        code: "custom",
+        path: ["packs"],
+        message: "Each pack needs its own description.",
+      });
+    }
+  });
+
+export const rejectMedicineSubmissionSchema = z
+  .object({
+    reason: z.string().trim().min(1).max(500),
+  })
+  .strict();
+
+export const medicineSubmissionIngredientResponseSchema = z.object({
+  ingredientName: z.string(),
+  kind: ingredientKindSchema,
+  strengthValue: z.string(),
+  strengthUnit: strengthUnitSchema,
+  basis: z.string().nullable(),
+  sequence: z.number().int(),
+});
+
+export const medicineSubmissionPackResponseSchema = z.object({
+  description: z.string(),
+  quantity: z.string(),
+  unit: packUnitSchema,
+});
+
+export const medicineSubmissionCandidateSchema = z.object({
+  kind: z.enum(["medicine", "submission"]),
+  id: z.uuid(),
+  displayName: z.string(),
+  match: z.enum(["exact", "similar"]),
+});
+
+export const medicineSubmissionSchema = z.object({
+  id: z.uuid(),
+  organizationId: z.uuid(),
+  status: medicineSubmissionStatusSchema,
+  displayName: z.string(),
+  brandName: z.string().nullable(),
+  genericName: z.string().nullable(),
+  dosageForm: z.string(),
+  presentation: z.string().nullable(),
+  manufacturerName: z.string().nullable(),
+  marketerName: z.string().nullable(),
+  indicativeUnitPrice: z.string().nullable(),
+  minimumOrderQuantity: z.string().nullable(),
+  stockStatus: z.enum(["IN_STOCK", "LOW_STOCK", "OUT_OF_STOCK", "UNKNOWN"]).nullable(),
+  availableQuantity: z.string().nullable(),
+  sourceNote: z.string().nullable(),
+  reviewReason: z.string().nullable(),
+  reviewedAt: z.string().nullable(),
+  approvedMedicineId: z.uuid().nullable(),
+  createdAt: z.string(),
+  ingredients: z.array(medicineSubmissionIngredientResponseSchema),
+  packs: z.array(medicineSubmissionPackResponseSchema),
+  candidates: z.array(medicineSubmissionCandidateSchema),
+  notice: z.literal(
+    "Your medicine submission must be approved before it becomes available in the shared medicine directory and can be listed for procurement.",
+  ),
+});
+
+export const medicineSubmissionPageSchema = z.object({
+  items: z.array(medicineSubmissionSchema),
+  page: z.number().int(),
+  pageSize: z.number().int(),
+  total: z.number().int(),
+});
+
+export type CreateMedicineSubmissionRequest = z.infer<typeof createMedicineSubmissionSchema>;
+export type RejectMedicineSubmissionRequest = z.infer<typeof rejectMedicineSubmissionSchema>;
+export type MedicineSubmissionResponse = z.infer<typeof medicineSubmissionSchema>;
+export type MedicineSubmissionPage = z.infer<typeof medicineSubmissionPageSchema>;
+
 export const replaceCompositionRequestSchema = z
   .object({
     lines: z
@@ -254,16 +387,20 @@ export const medicineResponseSchema = z.object({
   companies: z.array(medicineCompanyResponseSchema),
 });
 
-export const medicineSummarySchema = medicineResponseSchema.pick({
-  id: true,
-  displayName: true,
-  brandName: true,
-  genericName: true,
-  dosageForm: true,
-  presentation: true,
-  status: true,
-  searchVisible: true,
-});
+export const medicineSummarySchema = medicineResponseSchema
+  .pick({
+    id: true,
+    displayName: true,
+    brandName: true,
+    genericName: true,
+    dosageForm: true,
+    presentation: true,
+    status: true,
+    searchVisible: true,
+  })
+  .extend({
+    eligibleWholesalerCount: z.number().int().nonnegative(),
+  });
 
 export const medicinePageSchema = z.object({
   items: z.array(medicineSummarySchema),
@@ -303,8 +440,8 @@ export const listingSourceSchema = z.enum([
 const listingMoneySchema = z.string().regex(/^(?:0|[1-9]\d*)(?:\.\d{1,2})?$/);
 const listingQuantitySchema = z
   .string()
-  .regex(/^(?:0|[1-9]\d*)(?:\.\d{1,6})?$/)
-  .refine((value) => Number(value) > 0, "Quantity must be greater than zero.");
+  .regex(/^[1-9]\d*$/)
+  .refine((value) => Number(value) > 0, "Minimum order quantity must be a whole number of packs.");
 const listingAvailableSchema = z
   .string()
   .regex(/^(?:0|[1-9]\d*)(?:\.\d{1,6})?$/)
@@ -393,6 +530,87 @@ export const distributorListingSchema = retailerListingSchema.extend({
   organizationId: z.uuid(),
 });
 
+export const wholesalerContactSchema = z.object({
+  proprietorName: z.string(),
+  landlineNumber: z.string().nullable(),
+  mobileNumber: z.string().nullable(),
+});
+
+export const wholesalerListingSchema = retailerListingSchema.extend({
+  contact: wholesalerContactSchema.nullable(),
+});
+
+export const wholesalerQuerySchema = z.object({
+  medicinePackId: z.uuid().optional(),
+  q: z.string().trim().max(200).optional().default(""),
+  stockStatus: stockStatusSchema.optional(),
+  minPrice: listingMoneySchema.optional(),
+  maxPrice: listingMoneySchema.optional(),
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(50).default(20),
+});
+
+export const wholesalerPageSchema = z.object({
+  medicineId: z.uuid(),
+  eligibleWholesalerCount: z.number().int().nonnegative(),
+  items: z.array(wholesalerListingSchema),
+  page: z.number().int(),
+  pageSize: z.number().int(),
+  total: z.number().int().nonnegative(),
+});
+
+function blankContact(value: string | null | undefined): boolean {
+  return value == null || value.trim().length === 0;
+}
+
+export const distributorProfileRequestSchema = z
+  .object({
+    proprietorName: z.string().trim().min(1).max(120),
+    landlineNumber: z.string().trim().max(24).nullable().optional(),
+    mobileNumber: z.string().trim().max(24).nullable().optional(),
+    publish: z.boolean(),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    const landline = blankContact(value.landlineNumber)
+      ? null
+      : normalizeContactNumber("landline", value.landlineNumber ?? "");
+    const mobile = blankContact(value.mobileNumber)
+      ? null
+      : normalizeContactNumber("mobile", value.mobileNumber ?? "");
+    if (!blankContact(value.landlineNumber) && landline === null) {
+      context.addIssue({ code: "custom", path: ["landlineNumber"], message: "Enter a valid landline number." });
+    }
+    if (!blankContact(value.mobileNumber) && mobile === null) {
+      context.addIssue({ code: "custom", path: ["mobileNumber"], message: "Enter a valid mobile number." });
+    }
+    if (value.publish && landline === null && mobile === null) {
+      context.addIssue({
+        code: "custom",
+        path: ["publish"],
+        message: "A published profile needs a landline or a mobile number.",
+      });
+    }
+  })
+  .transform((value) => ({
+    proprietorName: value.proprietorName,
+    landlineNumber: blankContact(value.landlineNumber)
+      ? null
+      : normalizeContactNumber("landline", value.landlineNumber ?? ""),
+    mobileNumber: blankContact(value.mobileNumber)
+      ? null
+      : normalizeContactNumber("mobile", value.mobileNumber ?? ""),
+    publish: value.publish,
+  }));
+
+export const distributorProfileSchema = z.object({
+  organizationId: z.uuid(),
+  proprietorName: z.string().nullable(),
+  landlineNumber: z.string().nullable(),
+  mobileNumber: z.string().nullable(),
+  published: z.boolean(),
+});
+
 export const retailerListingPageSchema = z.object({
   items: z.array(retailerListingSchema),
   page: z.number().int(),
@@ -415,6 +633,11 @@ export type RetailerListing = z.infer<typeof retailerListingSchema>;
 export type DistributorListingResponse = z.infer<typeof distributorListingSchema>;
 export type RetailerListingPage = z.infer<typeof retailerListingPageSchema>;
 export type DistributorListingPage = z.infer<typeof distributorListingPageSchema>;
+export type WholesalerQuery = z.infer<typeof wholesalerQuerySchema>;
+export type WholesalerListing = z.infer<typeof wholesalerListingSchema>;
+export type WholesalerPage = z.infer<typeof wholesalerPageSchema>;
+export type DistributorProfileRequest = z.infer<typeof distributorProfileRequestSchema>;
+export type DistributorProfile = z.infer<typeof distributorProfileSchema>;
 
 export const enquiryStatusSchema = z.enum(["OPEN", "RESPONDED", "CLOSED"]);
 
@@ -578,3 +801,30 @@ export const apiErrorSchema = z.object({
 });
 
 export type ApiError = z.infer<typeof apiErrorSchema>;
+
+export const auditEventSchema = z.object({
+  id: z.uuid(),
+  area: z.enum(["catalog", "submission", "listing", "enquiry"]),
+  action: z.string().min(1),
+  createdAt: z.string(),
+});
+
+export const auditEventPageSchema = z.object({
+  items: z.array(auditEventSchema),
+  page: z.number().int(),
+  pageSize: z.number().int(),
+  total: z.number().int(),
+});
+
+export type AuditEvent = z.infer<typeof auditEventSchema>;
+export type AuditEventPage = z.infer<typeof auditEventPageSchema>;
+
+export { demoPersonaKey, demoPersonas, type DemoPersona } from "./demo-personas.js";
+export { demoModeConflict, demoModeEnabled } from "./demo-mode.js";
+export {
+  DEMO_ACCESS_TOKEN_PREFIX,
+  DEMO_ACCESS_TOKEN_TTL_SECONDS,
+  createDemoAccessToken,
+  verifyDemoAccessToken,
+  type VerifiedDemoAccessToken,
+} from "./demo-access-token.js";

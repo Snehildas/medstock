@@ -2,10 +2,22 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { healthResponseSchema } from "@medstock/shared-types";
 import { apiRequest, authorizationHeaders } from "./api-client.ts";
-import { authorizeUrl, safeReturnPath } from "./cognito.ts";
-import { membershipForSelection, resolveOrganization, type OrganizationChoice } from "./organization.ts";
+import { createHash } from "node:crypto";
+import { authorizeUrl, createAuthState, createPkcePair, safeReturnPath } from "./cognito.ts";
+import { assertProductionWebConfig } from "./production-config.ts";
+import { membershipForSelection, resolveOrganization, workspaceLanding, type OrganizationChoice } from "./organization.ts";
 import { decideRequest } from "./route-guard.ts";
-import { accessTokenExpired, cookiesClearedOnSignOut, openSession, sealSession } from "./session.ts";
+import {
+  accessTokenExpired,
+  cookiesClearedOnSignOut,
+  decideRefresh,
+  openSession,
+  refreshFlightKey,
+  refreshResult,
+  resetRefreshFlights,
+  sealSession,
+  singleFlightRefresh,
+} from "./session.ts";
 import { loadWebAuthConfig, missingWebAuthSettings } from "./web-auth-config.ts";
 
 const secret = "session-secret-session-secret-session";
@@ -31,8 +43,28 @@ test("unauthenticated requests for the workspace redirect to sign-in", () => {
     assert.equal(decision.pathname, "/sign-in");
     assert.equal(decision.returnTo, "/app");
   }
+  assert.equal(decideRequest("/app/discover", undefined).kind, "redirect");
   assert.equal(decideRequest("/", undefined).kind, "continue");
   assert.equal(decideRequest("/app/workspace", "sealed-cookie").kind, "continue");
+});
+
+test("retailer and distributor workspaces land on medicine search", () => {
+  assert.equal(workspaceLanding("RETAILER"), "/app/discover");
+  assert.equal(workspaceLanding("DISTRIBUTOR"), "/app/discover");
+  assert.equal(workspaceLanding("PLATFORM"), "/app");
+  assert.equal(workspaceLanding(undefined), "/app");
+  const retailer = membership("00000000-0000-4000-8000-0000000000aa");
+  retailer.organization.type = "RETAILER";
+  retailer.role = "RETAILER_OWNER";
+  const distributor = membership("00000000-0000-4000-8000-0000000000bb");
+  const selectedRetailer = resolveOrganization([retailer], retailer.organizationId);
+  const switched = resolveOrganization([retailer, distributor], distributor.organizationId);
+  assert.equal(selectedRetailer.kind, "selected");
+  assert.equal(switched.kind, "selected");
+  if (selectedRetailer.kind === "selected" && switched.kind === "selected") {
+    assert.equal(workspaceLanding(selectedRetailer.membership.organization.type), "/app/discover");
+    assert.equal(workspaceLanding(switched.membership.organization.type), "/app/discover");
+  }
 });
 
 test("a sealed session round-trips and an expired access token is detected without dropping the refresh token", () => {
@@ -164,5 +196,80 @@ test("Cognito configuration reports missing names and the authorize URL does not
   assert.match(url, /code_challenge_method=S256/);
   assert.equal(url.includes("client_secret"), false);
   assert.equal(safeReturnPath("https://evil.example/phish"), "/app");
+  assert.equal(safeReturnPath("//evil.example"), "/app");
+  assert.equal(safeReturnPath("/sign-in"), "/app");
+  assert.equal(safeReturnPath("/api/auth/callback"), "/app");
   assert.equal(safeReturnPath("/app"), "/app");
+  assert.equal(
+    loadWebAuthConfig({
+      COGNITO_REGION: "ap-south-1",
+      COGNITO_USER_POOL_ID: "ap-south-1_examplePool",
+      COGNITO_CLIENT_ID: "abcdefghijklmnopqrstuvwxyz",
+      COGNITO_DOMAIN: "not a host",
+      WEB_ORIGIN: "http://localhost:3000",
+      API_ORIGIN: "http://localhost:3001",
+      SESSION_SECRET: secret,
+    }),
+    null,
+  );
+});
+
+test("PKCE is S256, refresh failure signs the user out, and production rejects an http origin", () => {
+  const pair = createPkcePair();
+  assert.equal(createHash("sha256").update(pair.verifier).digest("base64url"), pair.challenge);
+  assert.notEqual(createAuthState(), createAuthState());
+  assert.equal(accessTokenExpired({ accessToken: "access", refreshToken: "refresh", expiresAt: 10 }, 10), true);
+  assert.equal(
+    decideRefresh({ hasSession: true, accessTokenStillValid: true, retryAlreadyUsed: true }),
+    "use-current-session",
+  );
+  assert.equal(
+    decideRefresh({ hasSession: true, accessTokenStillValid: false, retryAlreadyUsed: true }),
+    "sign-out",
+  );
+  assert.equal(
+    decideRefresh({ hasSession: false, accessTokenStillValid: false, retryAlreadyUsed: false }),
+    "sign-out",
+  );
+  assert.equal(
+    decideRefresh({ hasSession: true, accessTokenStillValid: false, retryAlreadyUsed: false }),
+    "refresh",
+  );
+  assert.equal(refreshResult({ networkFailed: true, tokenResponseOk: false, tokenParsed: false }), "keep-session");
+  assert.equal(refreshResult({ networkFailed: false, tokenResponseOk: false, tokenParsed: false }), "sign-out");
+  assert.equal(refreshResult({ networkFailed: false, tokenResponseOk: true, tokenParsed: true }), "store");
+  assert.equal(openSession("", secret), null);
+  assert.throws(() => assertProductionWebConfig({ NODE_ENV: "production" }));
+  assert.throws(() =>
+    assertProductionWebConfig({
+      NODE_ENV: "production",
+      COGNITO_REGION: "ap-south-1",
+      COGNITO_USER_POOL_ID: "ap-south-1_examplePool",
+      COGNITO_CLIENT_ID: "abcdefghijklmnopqrstuvwxyz",
+      COGNITO_DOMAIN: "medstock.auth.ap-south-1.amazoncognito.com",
+      WEB_ORIGIN: "http://localhost:3000",
+      API_ORIGIN: "http://localhost:3001",
+      SESSION_SECRET: secret,
+    }),
+  );
+  assert.doesNotThrow(() => assertProductionWebConfig({ NODE_ENV: "development" }));
+});
+
+test("concurrent refreshes share one token exchange", async () => {
+  resetRefreshFlights();
+  let calls = 0;
+  const key = refreshFlightKey("refresh-token-value");
+  const first = singleFlightRefresh(key, async () => {
+    calls += 1;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    return "new-access-token";
+  });
+  const second = singleFlightRefresh(key, async () => {
+    calls += 1;
+    return "should-not-run";
+  });
+  assert.equal(await first, "new-access-token");
+  assert.equal(await second, "new-access-token");
+  assert.equal(calls, 1);
+  resetRefreshFlights();
 });

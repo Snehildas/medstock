@@ -7,8 +7,19 @@ coverage/
 *.tsbuildinfo
 
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
+!.env.template
+
+*.pem
+*.key
+*.p12
+*.pfx
+
+secrets/
+private/
+credentials/
+.aws/
 
 packages/database/src/generated/
 

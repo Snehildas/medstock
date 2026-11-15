@@ -5,6 +5,16 @@
   "description": "Framework-independent API contracts for MedStock.",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./demo-access-token": {
+      "types": "./dist/demo-access-token.d.ts",
+      "default": "./dist/demo-access-token.js"
+    }
+  },
   "files": ["dist"],
   "scripts": {
     "build": "tsc -p tsconfig.json",
@@ -15,6 +25,7 @@
     "zod": "4.6.7"
   },
   "devDependencies": {
+    "@types/node": "26.6.6",
     "eslint": "9.39.1",
     "typescript": "6.0.3",
     "typescript-eslint": "8.72.1"

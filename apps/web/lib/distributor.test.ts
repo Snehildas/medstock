@@ -65,6 +65,18 @@ test("create validation reports field errors and accepts a complete listing", ()
     assert.ok(invalid.fieldErrors.minimumOrderQuantity);
     assert.ok(invalid.fieldErrors.stockStatus);
   }
+  const fractional = validateCreateListing({
+    medicinePackId: packId,
+    unitPrice: "12.50",
+    minimumOrderQuantity: "1.5",
+    stockStatus: "IN_STOCK",
+    availableQuantity: "",
+    sourceNote: "",
+  });
+  assert.equal(fractional.ok, false);
+  if (!fractional.ok) {
+    assert.ok(fractional.fieldErrors.minimumOrderQuantity);
+  }
   const valid = validateCreateListing({
     medicinePackId: packId,
     unitPrice: "12.50",

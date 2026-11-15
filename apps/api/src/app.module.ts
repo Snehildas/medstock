@@ -8,9 +8,10 @@ import { SafeExceptionFilter } from "./http/safe-exception.filter.js";
 import { ImportModule } from "./imports/import.module.js";
 import { IdentityHttpModule } from "./identity/identity-http.module.js";
 import { ListingModule } from "./listings/listing.module.js";
+import { SubmissionModule } from "./submissions/submission.module.js";
 
 @Module({
-  imports: [DatabaseModule, IdentityHttpModule, CatalogModule, ListingModule, EnquiryModule, ImportModule],
+  imports: [DatabaseModule, IdentityHttpModule, CatalogModule, ListingModule, EnquiryModule, ImportModule, SubmissionModule],
   controllers: [HealthController],
   providers: [SafeExceptionFilter, { provide: APP_FILTER, useExisting: SafeExceptionFilter }],
 })

@@ -34,9 +34,16 @@ export default async function MedicineDetailPage({ params }: { params: Promise<{
         title={view.name}
         description={`${medicine.genericName} · ${view.dosageForm}${medicine.brandName ? ` · ${medicine.brandName}` : ""}${medicine.presentation ? ` · ${medicine.presentation}` : ""}. This catalog record is read-only and is not medical advice.`}
         actions={
-          <Button asChild variant="outline">
-            <Link href={`/app/discover/listings?medicineId=${medicine.id}`}>Compare listings</Link>
-          </Button>
+          <>
+            <Button asChild>
+              <Link href={`/app/discover/medicines/${medicine.id}/wholesalers`}>
+                View wholesalers
+              </Link>
+            </Button>
+            <Button asChild variant="outline">
+              <Link href={`/app/discover/listings?medicineId=${medicine.id}`}>Compare listings</Link>
+            </Button>
+          </>
         }
       />
       <section className="space-y-2">

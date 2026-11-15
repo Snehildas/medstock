@@ -1,0 +1,61 @@
+# Render blueprint for the free interactive demo.
+# Secrets are entered in the dashboard. autoDeploy stays off until someone enables it there.
+services:
+  - type: web
+    name: medstock-demo-api
+    runtime: docker
+    plan: free
+    dockerfilePath: ./apps/api/Dockerfile
+    dockerContext: .
+    autoDeploy: false
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: MEDSTOCK_DEMO_MODE
+        value: "true"
+      - key: AUTH_DEV_MODE
+        value: "false"
+      - key: MEDSTOCK_LOCAL_PREVIEW
+        value: "false"
+      - key: RATE_LIMIT_TRUSTED_PROXY_HOPS
+        value: "1"
+      - key: DATABASE_POOL_MAX
+        value: "3"
+      - key: NODE_OPTIONS
+        value: --max-old-space-size=384
+      - key: DATABASE_URL
+        sync: false
+      - key: WEB_ORIGIN
+        sync: false
+      - key: MEDSTOCK_DEMO_TOKEN_SECRET
+        sync: false
+  - type: web
+    name: medstock-demo-web
+    runtime: docker
+    plan: free
+    dockerfilePath: ./apps/web/Dockerfile
+    dockerContext: .
+    autoDeploy: false
+    healthCheckPath: /sign-in
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: MEDSTOCK_DEMO_MODE
+        value: "true"
+      - key: AUTH_DEV_MODE
+        value: "false"
+      - key: MEDSTOCK_LOCAL_PREVIEW
+        value: "false"
+      - key: RATE_LIMIT_TRUSTED_PROXY_HOPS
+        value: "1"
+      - key: NODE_OPTIONS
+        value: --max-old-space-size=384
+      - key: WEB_ORIGIN
+        sync: false
+      - key: API_ORIGIN
+        sync: false
+      - key: SESSION_SECRET
+        sync: false
+      - key: MEDSTOCK_DEMO_TOKEN_SECRET
+        sync: false

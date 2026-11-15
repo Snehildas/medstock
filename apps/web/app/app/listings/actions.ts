@@ -3,6 +3,8 @@
 import { redirect } from "next/navigation";
 import {
   distributorListingSchema,
+  distributorProfileRequestSchema,
+  distributorProfileSchema,
   medicinePageSchema,
   medicineResponseSchema,
 } from "@medstock/shared-types";
@@ -179,6 +181,40 @@ export async function transitionListing(formData: FormData): Promise<void> {
     redirect(`/app/listings/${listingId}?notice=rejected`);
   }
   redirect(`/app/listings/${listingId}?notice=${action}`);
+}
+
+export async function updateProfileAction(_previous: FormState, formData: FormData): Promise<FormState> {
+  const postedOrganizationId = String(formData.get("organizationId") ?? "");
+  const selected = await selectedDistributor(postedOrganizationId, "/app/listings");
+  if (!selected.membership) {
+    return { message: selected.message, fieldErrors: {} };
+  }
+  if (selected.membership.role !== "DISTRIBUTOR_OWNER") {
+    return { message: "Only a distributor owner can update wholesaler contact details.", fieldErrors: {} };
+  }
+  const parsed = distributorProfileRequestSchema.safeParse({
+    proprietorName: String(formData.get("proprietorName") ?? ""),
+    landlineNumber: optionalText(formData.get("landlineNumber")),
+    mobileNumber: optionalText(formData.get("mobileNumber")),
+    publish: formData.get("publish") === "on",
+  });
+  if (!parsed.success) {
+    const fieldErrors: Record<string, string> = {};
+    for (const issue of parsed.error.issues) {
+      const key = String(issue.path[0] ?? "form");
+      fieldErrors[key] = issue.message;
+    }
+    return { message: "Check the highlighted fields.", fieldErrors };
+  }
+  const result = await distributorApi(
+    `/distributor/profile?organizationId=${selected.membership.organizationId}`,
+    distributorProfileSchema,
+    { method: "PATCH", body: parsed.data, returnTo: "/app/listings" },
+  );
+  if (!result.ok) {
+    return { message: result.message, fieldErrors: result.fieldErrors ?? {} };
+  }
+  redirect("/app/listings?notice=profile");
 }
 
 function optionalText(value: FormDataEntryValue | null): string | null {

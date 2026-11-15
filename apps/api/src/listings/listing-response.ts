@@ -3,13 +3,15 @@ import {
   distributorListingSchema,
   retailerListingPageSchema,
   retailerListingSchema,
+  wholesalerPageSchema,
   type DistributorListingPage,
   type DistributorListingResponse,
   type RetailerListing,
   type RetailerListingPage,
+  type WholesalerPage,
 } from "@medstock/shared-types";
 import { formatDecimal } from "../catalog/search-text.js";
-import { freshnessFor, type ListingRecord } from "./listing.service.js";
+import { freshnessFor, publishedContact, type ListingRecord, type WholesalerRecord } from "./listing.service.js";
 
 export function toRetailerListing(listing: ListingRecord, now = new Date()): RetailerListing {
   const freshness = freshnessFor(listing, now);
@@ -60,6 +62,30 @@ export function toRetailerPage(
   return retailerListingPageSchema.parse({
     ...page,
     items: page.items.map((listing) => toRetailerListing(listing, now)),
+  });
+}
+
+export function toWholesalerPage(
+  page: {
+    medicineId: string;
+    eligibleWholesalerCount: number;
+    items: WholesalerRecord[];
+    page: number;
+    pageSize: number;
+    total: number;
+  },
+  now = new Date(),
+): WholesalerPage {
+  return wholesalerPageSchema.parse({
+    medicineId: page.medicineId,
+    eligibleWholesalerCount: page.eligibleWholesalerCount,
+    page: page.page,
+    pageSize: page.pageSize,
+    total: page.total,
+    items: page.items.map((listing) => ({
+      ...toRetailerListing(listing, now),
+      contact: publishedContact(listing),
+    })),
   });
 }
 

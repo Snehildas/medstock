@@ -4,18 +4,26 @@ import {
   distributorListingPageSchema,
   distributorListingQuerySchema,
   distributorListingSchema,
+  distributorProfileRequestSchema,
+  distributorProfileSchema,
   listingSearchQuerySchema,
   retailerListingPageSchema,
   retailerListingSchema,
   updateListingRequestSchema,
+  wholesalerPageSchema,
+  wholesalerQuerySchema,
   type CreateListingRequest,
   type DistributorListingPage,
   type DistributorListingQuery,
   type DistributorListingResponse,
+  type DistributorProfile,
+  type DistributorProfileRequest,
   type ListingSearchQuery,
   type RetailerListing,
   type RetailerListingPage,
   type UpdateListingRequest,
+  type WholesalerPage,
+  type WholesalerQuery,
 } from "@medstock/shared-types";
 import { z } from "zod";
 import { CurrentIdentity } from "../identity/current-identity.decorator.js";
@@ -28,6 +36,7 @@ import {
   toDistributorPage,
   toRetailerListing,
   toRetailerPage,
+  toWholesalerPage,
 } from "./listing-response.js";
 import { ListingService } from "./listing.service.js";
 
@@ -145,5 +154,37 @@ export class ListingController {
     const actor = await this.identityService.provision(identity);
     const listing = await this.listings.getForRetailer(actor.id, listingId);
     return retailerListingSchema.parse(toRetailerListing(listing));
+  }
+
+  @Get("retailer/medicines/:medicineId/wholesalers")
+  async wholesalers(
+    @CurrentIdentity() identity: VerifiedIdentity,
+    @Param("medicineId", listingIdPipe) medicineId: string,
+    @Query(new ZodValidationPipe(wholesalerQuerySchema)) query: WholesalerQuery,
+  ): Promise<WholesalerPage> {
+    const actor = await this.identityService.provision(identity);
+    const page = await this.listings.listWholesalers(actor.id, medicineId, query);
+    return wholesalerPageSchema.parse(toWholesalerPage(page));
+  }
+
+  @Get("distributor/profile")
+  async profile(
+    @CurrentIdentity() identity: VerifiedIdentity,
+    @Query(organizationQueryPipe) query: { organizationId: string },
+  ): Promise<DistributorProfile> {
+    const actor = await this.identityService.provision(identity);
+    return distributorProfileSchema.parse(await this.listings.getProfile(actor.id, query.organizationId));
+  }
+
+  @Patch("distributor/profile")
+  async updateProfile(
+    @CurrentIdentity() identity: VerifiedIdentity,
+    @Query(organizationQueryPipe) query: { organizationId: string },
+    @Body(new ZodValidationPipe(distributorProfileRequestSchema)) body: DistributorProfileRequest,
+  ): Promise<DistributorProfile> {
+    const actor = await this.identityService.provision(identity);
+    return distributorProfileSchema.parse(
+      await this.listings.updateProfile(actor.id, query.organizationId, body),
+    );
   }
 }

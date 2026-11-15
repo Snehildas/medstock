@@ -21,6 +21,12 @@ export class UnverifiedIdentityError extends DomainError {
   }
 }
 
+export class DisabledIdentityError extends DomainError {
+  constructor() {
+    super("disabled_identity", "This account cannot sign in.", 403);
+  }
+}
+
 export class IdentityLinkRequiredError extends DomainError {
   constructor() {
     super(
@@ -222,6 +228,44 @@ export class ImportNotFoundError extends DomainError {
 export class ImportForbiddenError extends DomainError {
   constructor() {
     super("import_forbidden", "You cannot access this import.", 403);
+  }
+}
+
+export class SubmissionNotFoundError extends DomainError {
+  constructor() {
+    super("submission_not_found", "The medicine submission was not found.", 404);
+  }
+}
+
+export class SubmissionForbiddenError extends DomainError {
+  constructor() {
+    super("submission_forbidden", "You cannot access this medicine submission.", 403);
+  }
+}
+
+export class InvalidSubmissionTransitionError extends DomainError {
+  constructor() {
+    super("invalid_submission_transition", "That medicine submission can no longer be reviewed.", 409);
+  }
+}
+
+export class DuplicatePendingSubmissionError extends DomainError {
+  constructor() {
+    super(
+      "duplicate_pending_submission",
+      "This organization already has a pending submission with that medicine name.",
+      409,
+    );
+  }
+}
+
+export class ProfileContactRequiredError extends DomainError {
+  constructor() {
+    super(
+      "profile_contact_required",
+      "A published distributor profile needs a valid landline or mobile number.",
+      400,
+    );
   }
 }
 

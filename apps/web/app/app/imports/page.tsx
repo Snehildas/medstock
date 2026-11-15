@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import Link from "next/link";
 import { listingImportPageSchema } from "@medstock/shared-types";
 import { DataTable, tdClass, thClass } from "@/components/data-table";
@@ -10,7 +11,19 @@ import { formatWhen } from "@/lib/labels";
 import { ImportUpload } from "@/components/import-upload";
 import { DistributorRequired, RequestProblem } from "@/components/workspace-states";
 
-export default async function ImportsPage({
+export default function ImportsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ page?: string | string[] }>;
+}) {
+  return (
+    <Suspense fallback={<p className="text-sm text-muted-foreground">Loading imports…</p>}>
+      <ImportsContent searchParams={searchParams} />
+    </Suspense>
+  );
+}
+
+async function ImportsContent({
   searchParams,
 }: {
   searchParams: Promise<{ page?: string | string[] }>;

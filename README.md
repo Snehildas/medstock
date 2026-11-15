@@ -27,7 +27,7 @@ pnpm dev
 
 The web app runs on port 3000 and the API on port 3001. Copy `.env.example` to `.env` and replace values outside the local Compose defaults. Do not commit secrets.
 
-The API serves liveness and readiness checks, identity routes, the canonical medicine catalog, distributor listings, enquiries, and manual listing imports. Staging configuration is in `docs/deployment.md`. The web app signs in through Cognito and keeps the session in an HttpOnly cookie. Catalog rules are in `docs/catalog.md`. Listing rules are in `docs/listings.md`. Enquiry rules are in `docs/enquiries.md`. Import rules are in `docs/imports.md`. Authentication rules are in `docs/authentication.md`. Cognito access-token verification is configured with `COGNITO_REGION`, `COGNITO_USER_POOL_ID`, and `COGNITO_CLIENT_ID`. See `apps/api/README.md`. Database setup is in `packages/database/README.md`.
+The API serves liveness and readiness checks, identity routes, the canonical medicine catalog, distributor listings, enquiries, and manual listing imports. Staging configuration is in `docs/deployment.md`. The web app signs in through Cognito and keeps the session in an HttpOnly cookie. Catalog rules are in `docs/catalog.md`. Listing rules are in `docs/listings.md`. Enquiry rules are in `docs/enquiries.md`. Import rules are in `docs/imports.md`. Authentication rules are in `docs/authentication.md`. Secret handling and the security checklist are in `docs/security.md`. Cognito access-token verification is configured with `COGNITO_REGION`, `COGNITO_USER_POOL_ID`, and `COGNITO_CLIENT_ID`. See `apps/api/README.md`. Database setup is in `packages/database/README.md`.
 
 ## Checks
 

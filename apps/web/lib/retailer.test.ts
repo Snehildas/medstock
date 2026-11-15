@@ -14,7 +14,10 @@ import {
   enquiryListTarget,
   retailerAccess,
   retailerListingSearch,
+  medicineSearchPresentation,
+  phoneHref,
   searchResultView,
+  wholesalerDirectoryState,
   submitLocked,
   validateCreateEnquiry,
   validateEnquiryResponse,
@@ -31,6 +34,41 @@ test("retailer and distributor features stay on their own organization types", (
   assert.equal(retailerAccess("DISTRIBUTOR"), "blocked");
   assert.equal(retailerAccess("PLATFORM"), "blocked");
   assert.equal(retailerAccess(undefined), "blocked");
+});
+
+test("medicine search shows the name, salts, strength, and wholesaler link", () => {
+  const medicineId = "00000000-0000-4000-8000-0000000000b1";
+  const combined = medicineSearchPresentation({
+    id: medicineId,
+    displayName: "Augmentin 625",
+    brandName: "Augmentin",
+    dosageForm: "Tablet",
+    compositions: [
+      { ingredientName: "Amoxicillin", strengthValue: "500", strengthUnit: "MG" },
+      { ingredientName: "Clavulanic Acid", strengthValue: "125", strengthUnit: "MG" },
+    ],
+    eligibleWholesalerCount: 2,
+  });
+  assert.equal(combined.name, "Augmentin 625");
+  assert.equal(combined.salts, "Amoxicillin + Clavulanic Acid");
+  assert.equal(combined.salts?.includes("Augmentin"), false);
+  assert.equal(combined.strength, "500 MG + 125 MG · Tablet");
+  assert.equal(combined.wholesalerHref, `/app/discover/medicines/${medicineId}/wholesalers`);
+  assert.equal(combined.wholesalerCount, 2);
+  const missing = medicineSearchPresentation({
+    id: medicineId,
+    displayName: "Plain Tablet",
+    brandName: "Plain Tablet",
+    dosageForm: "Tablet",
+    compositions: [],
+    eligibleWholesalerCount: 0,
+  });
+  assert.equal(missing.salts, null);
+  assert.equal(missing.strength, "Tablet");
+  assert.equal(wholesalerDirectoryState(0), "empty");
+  assert.equal(wholesalerDirectoryState(1), "results");
+  assert.equal(phoneHref("+919812345678"), "tel:+919812345678");
+  assert.equal(phoneHref(null), null);
 });
 
 test("catalog search distinguishes a prompt, loading, an error, no results, and results", () => {

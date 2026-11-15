@@ -9,11 +9,13 @@ export function AppShell({
   account,
   notice,
   preview = false,
+  demo = false,
   children,
 }: {
   account: AccountState;
   notice: string | null;
   preview?: boolean;
+  demo?: boolean;
   children: ReactNode;
 }) {
   const selected = account.organization.kind === "selected" ? account.organization.membership : null;
@@ -31,6 +33,7 @@ export function AppShell({
     <AppFrame
       groups={groups}
       preview={preview}
+      demo={demo}
       displayName={account.user.name ?? account.user.email}
       email={account.user.email}
       organizationName={selected?.organization.name ?? "Workspace"}
@@ -81,17 +84,12 @@ export function AppShell({
 }
 
 function navigationFor(type: string | undefined): ShellGroup[] {
-  const workspace: ShellGroup = {
-    label: "Workspace",
-    links: [{ href: "/app", label: "Overview", icon: "overview", match: "exact" }],
-  };
   if (type === "RETAILER") {
     return [
-      workspace,
       {
         label: "Procurement",
         links: [
-          { href: "/app/discover", label: "Discover medicines", icon: "discover", match: "discover" },
+          { href: "/app/discover", label: "Find medicines", icon: "discover", match: "discover" },
           { href: "/app/discover/listings", label: "Listings", icon: "listings", match: "comparison" },
           { href: "/app/enquiries", label: "Enquiries", icon: "enquiries", match: "prefix" },
         ],
@@ -100,16 +98,26 @@ function navigationFor(type: string | undefined): ShellGroup[] {
   }
   if (type === "DISTRIBUTOR") {
     return [
-      workspace,
       {
         label: "Distributor",
         links: [
+          { href: "/app/discover", label: "Find medicines", icon: "discover", match: "discover" },
           { href: "/app/listings", label: "My listings", icon: "listings", match: "prefix" },
+          { href: "/app/catalog/submissions", label: "Medicine submissions", icon: "overview", match: "prefix" },
           { href: "/app/imports", label: "Imports", icon: "imports", match: "prefix" },
           { href: "/app/enquiries", label: "Incoming enquiries", icon: "enquiries", match: "prefix" },
         ],
       },
     ];
   }
-  return [workspace];
+  return [
+    {
+      label: "Workspace",
+      links: [
+        { href: "/app", label: "Overview", icon: "overview", match: "exact" },
+        { href: "/app/admin/submissions", label: "Review submissions", icon: "discover", match: "prefix" },
+        { href: "/app/admin/audit", label: "Audit events", icon: "overview", match: "prefix" },
+      ],
+    },
+  ];
 }

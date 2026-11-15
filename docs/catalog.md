@@ -42,7 +42,7 @@ A pack is unique per medicine by its description. The same count in two descript
 
 ## Lifecycle
 
-`DRAFT` to `PUBLISHED`, `DRAFT` to `ARCHIVED`, and `PUBLISHED` to `ARCHIVED` are allowed. Archived medicines stay archived. Published and archived medicines are not edited in place. Search visibility is separate: a published medicine can be hidden. Ordinary search and ordinary reads return only rows that are `PUBLISHED` and `searchVisible`. A platform admin can read a draft or hidden medicine by id.
+`DRAFT` to `PUBLISHED`, `DRAFT` to `ARCHIVED`, and `PUBLISHED` to `ARCHIVED` are allowed. Archived medicines stay archived. Published and archived medicines are not edited in place. Search visibility is separate: a published medicine can be hidden. Ordinary search and ordinary reads return only rows that are `PUBLISHED` and `searchVisible`. A platform admin can read a draft or hidden medicine by id. Distributor submissions are stored separately and are not searchable until a platform admin approves one into this lifecycle.
 
 New medicines start as drafts and are not searchable. `sourceLabel` defaults to `manual`. `sourceReference` is an optional note. No external medicine file is loaded by this task.
 
@@ -63,5 +63,7 @@ Catalog writes require an active `PLATFORM_ADMIN` membership on a `PLATFORM` org
 Reads require a verified identity. They do not require a platform-admin membership.
 
 ## Future import
+
+A distributor submission proposes a new medicine, its salts, packs, and inventory details. It stays pending until a platform admin approves it. Approval publishes the catalog medicine and keeps the proposed price, MOQ, and stock on the submission. It does not create an active listing.
 
 Do not import an external medicine file until its license and permitted use are recorded. An import should write `sourceLabel` and `sourceReference`, keep invalid rows out of the catalog, and report those rows. It should not partially publish a medicine. That workflow is not implemented.

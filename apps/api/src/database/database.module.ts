@@ -1,5 +1,5 @@
 import { Injectable, Module, type OnModuleDestroy } from "@nestjs/common";
-import { createPrismaClient, PrismaClient } from "@medstock/database";
+import { createPrismaClient, PrismaClient, readDatabasePoolMax } from "@medstock/database";
 
 @Injectable()
 class PrismaLifecycle implements OnModuleDestroy {
@@ -19,7 +19,7 @@ class PrismaLifecycle implements OnModuleDestroy {
         if (!databaseUrl) {
           throw new Error("DATABASE_URL is required.");
         }
-        return createPrismaClient(databaseUrl);
+        return createPrismaClient(databaseUrl, readDatabasePoolMax(process.env.DATABASE_POOL_MAX));
       },
     },
     PrismaLifecycle,

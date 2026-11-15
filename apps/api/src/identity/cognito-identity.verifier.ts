@@ -1,5 +1,8 @@
 import { CognitoJwtVerifier } from "aws-jwt-verify";
+import type { Jwks } from "aws-jwt-verify/jwk";
+import { demoModeConflict, demoModeEnabled } from "@medstock/shared-types";
 import { InvalidIdentityError, UnverifiedIdentityError } from "./domain-error.js";
+import { DemoIdentityVerifier } from "./demo-identity.verifier.js";
 import type { IdentityVerifier, VerifiedIdentity } from "./identity-verifier.js";
 import { loadCognitoAuthConfig, type CognitoAuthConfig } from "./cognito-auth.config.js";
 
@@ -60,12 +63,18 @@ export class CognitoIdentityVerifier implements IdentityVerifier {
   }
 }
 
-export function createCognitoAccessTokenChecker(config: CognitoAuthConfig): AccessTokenChecker {
+export function createCognitoAccessTokenChecker(
+  config: CognitoAuthConfig,
+  options?: { jwks?: Jwks },
+): AccessTokenChecker {
   const verifier = CognitoJwtVerifier.create({
     userPoolId: config.userPoolId,
     tokenUse: "access",
     clientId: config.clientId,
   });
+  if (options?.jwks) {
+    verifier.cacheJwks(options.jwks);
+  }
   return {
     async verify(accessToken: string): Promise<AccessTokenClaims> {
       const payload = await verifier.verify(accessToken);
@@ -85,6 +94,17 @@ export function createCognitoAccessTokenChecker(config: CognitoAuthConfig): Acce
 export function createIdentityVerifier(
   env: Record<string, string | undefined>,
 ): IdentityVerifier {
+  if (demoModeEnabled(env)) {
+    const conflict = demoModeConflict(env);
+    if (conflict) {
+      throw new Error(conflict);
+    }
+    const secret = env.MEDSTOCK_DEMO_TOKEN_SECRET?.trim() ?? "";
+    if (secret.length < 32) {
+      throw new Error("MEDSTOCK_DEMO_TOKEN_SECRET must be at least 32 characters when MEDSTOCK_DEMO_MODE is true.");
+    }
+    return new DemoIdentityVerifier(secret);
+  }
   const config = loadCognitoAuthConfig(env);
   if (!config) {
     if (env.NODE_ENV === "production") {

@@ -1,10 +1,13 @@
+import { headers } from "next/headers";
 import { redirect } from "next/navigation";
+import { demoModeEnabled } from "@medstock/shared-types";
 import type { ZodType } from "zod";
 import { readApiSession } from "./account";
 import { apiRequest, type ApiFailure, type ApiSuccess } from "./api-client";
 import { safeReturnPath } from "./cognito";
 import { previewApiResult } from "./preview-data";
 import { localPreviewAllowed } from "./preview-mode";
+import { limitApiPath } from "./rate-limit";
 
 export async function distributorApi<T>(
   path: string,
@@ -14,6 +17,11 @@ export async function distributorApi<T>(
   if (localPreviewAllowed(process.env)) {
     return previewApiResult(path, schema, init.method ?? "GET");
   }
+  const method = init.method ?? "GET";
+  const limited = limitApiPath(method, path, await forwardedFor());
+  if (limited) {
+    return limited;
+  }
   const returnTo = safeReturnPath(init.returnTo ?? "/app");
   const session = await readApiSession(returnTo);
   const result = await apiRequest({
@@ -21,11 +29,24 @@ export async function distributorApi<T>(
     path,
     accessToken: session.accessToken,
     schema,
-    ...(init.method ? { method: init.method } : {}),
+    ...(method !== "GET" ? { method } : {}),
     ...(init.body !== undefined ? { body: init.body } : {}),
   });
   if (!result.ok && result.status === 401) {
-    redirect(`/api/auth/refresh?returnTo=${encodeURIComponent(returnTo)}`);
+    const destination = encodeURIComponent(returnTo);
+    redirect(
+      demoModeEnabled(process.env)
+        ? `/sign-in?reason=expired&returnTo=${destination}`
+        : `/api/auth/refresh?returnTo=${destination}`,
+    );
   }
   return result;
+}
+
+async function forwardedFor(): Promise<string | undefined> {
+  try {
+    return (await headers()).get("x-forwarded-for") ?? undefined;
+  } catch {
+    return undefined;
+  }
 }

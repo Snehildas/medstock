@@ -7,6 +7,7 @@ import {
   type PrismaClient as MedstockPrisma,
 } from "@medstock/database";
 import {
+  DisabledIdentityError,
   IdentityLinkRequiredError,
   InvalidIdentityError,
   UnverifiedIdentityError,
@@ -67,6 +68,9 @@ export class IdentityService {
       include: { user: true },
     });
     if (mapped) {
+      if (mapped.user.status === UserStatus.DISABLED) {
+        throw new DisabledIdentityError();
+      }
       return mapped.user;
     }
 
@@ -101,6 +105,9 @@ export class IdentityService {
       include: { user: true },
     });
     if (mapped) {
+      if (mapped.user.status === UserStatus.DISABLED) {
+        throw new DisabledIdentityError();
+      }
       return mapped.user;
     }
     const existingUser = await this.prisma.user.findUnique({ where: { email } });

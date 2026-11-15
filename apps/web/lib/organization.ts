@@ -47,3 +47,10 @@ export function membershipForSelection(
 ): OrganizationChoice | null {
   return activeMemberships(memberships).find((membership) => membership.organizationId === organizationId) ?? null;
 }
+
+export function workspaceLanding(organizationType: string | undefined): "/app" | "/app/discover" {
+  if (organizationType === "RETAILER" || organizationType === "DISTRIBUTOR") {
+    return "/app/discover";
+  }
+  return "/app";
+}

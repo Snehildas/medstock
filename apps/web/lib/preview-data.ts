@@ -15,6 +15,7 @@ const PARA_BOTTLE_ID = "00000000-0000-4000-8000-000000000c02";
 const AMOX_STRIP_ID = "00000000-0000-4000-8000-000000000c03";
 const INGREDIENT_PARA = "00000000-0000-4000-8000-000000000d01";
 const INGREDIENT_AMOX = "00000000-0000-4000-8000-000000000d02";
+const INGREDIENT_CLAV = "00000000-0000-4000-8000-000000000d03";
 const COMPANY_ID = "00000000-0000-4000-8000-000000000d11";
 
 const LISTING_NORTH_STRIP = "00000000-0000-4000-8000-000000000e01";
@@ -24,6 +25,9 @@ const LISTING_OWN_AMOX = "00000000-0000-4000-8000-000000000e04";
 const ENQUIRY_OPEN = "00000000-0000-4000-8000-000000000f01";
 const ENQUIRY_RESPONDED = "00000000-0000-4000-8000-000000000f02";
 const IMPORT_PREVIEW = "00000000-0000-4000-8000-000000000f11";
+const SUBMISSION_PENDING = "00000000-0000-4000-8000-000000000f21";
+const SUBMISSION_APPROVED = "00000000-0000-4000-8000-000000000f22";
+const SUBMISSION_REJECTED = "00000000-0000-4000-8000-000000000f23";
 
 const NOTICE = "This is an enquiry only. It is not an order, quote, or stock reservation." as const;
 const CREATED = "2026-11-01T09:00:00.000Z";
@@ -114,6 +118,14 @@ const medicines = [
         strengthUnit: "MG" as const,
         basis: "per capsule",
         sequence: 1,
+      },
+      {
+        ingredientId: INGREDIENT_CLAV,
+        ingredientName: "Clavulanic Acid",
+        strengthValue: "125",
+        strengthUnit: "MG" as const,
+        basis: "per capsule",
+        sequence: 2,
       },
     ],
     packs: [{ id: AMOX_STRIP_ID, description: "Strip of 10 capsules", quantity: "10", unit: "CAPSULE" as const }],
@@ -346,6 +358,7 @@ function previewGet(path: string): unknown | null {
         presentation: medicine.presentation,
         status: medicine.status,
         searchVisible: medicine.searchVisible,
+        eligibleWholesalerCount: eligibleWholesalerCount(medicine.id),
       })),
       page,
       pageSize,
@@ -409,13 +422,140 @@ function previewGet(path: string): unknown | null {
   if (importDetail) {
     return importRecord.id === importDetail[1] ? importRecord : null;
   }
+  const wholesalers = /^\/retailer\/medicines\/([^/]+)\/wholesalers$/.exec(url.pathname);
+  if (wholesalers) {
+    return previewWholesalers(wholesalers[1] ?? "", url, page, pageSize);
+  }
+  if (url.pathname === "/distributor/profile") {
+    const organizationId = url.searchParams.get("organizationId");
+    if (organizationId !== PREVIEW_DISTRIBUTOR_ID) {
+      return {
+        organizationId,
+        proprietorName: null,
+        landlineNumber: null,
+        mobileNumber: null,
+        published: false,
+      };
+    }
+    return {
+      organizationId: PREVIEW_DISTRIBUTOR_ID,
+      proprietorName: "Preview Proprietor (mock)",
+      landlineNumber: null,
+      mobileNumber: "+919800000001",
+      published: true,
+    };
+  }
   if (url.pathname === "/distributor/imports") {
     if (url.searchParams.get("organizationId") !== PREVIEW_DISTRIBUTOR_ID) {
       return pageOf([], page, pageSize);
     }
     return pageOf([importSummary()], page, pageSize);
   }
+  const submissionDetail = /^\/distributor\/medicine-submissions\/([^/]+)$/.exec(url.pathname);
+  if (submissionDetail) {
+    if (url.searchParams.get("organizationId") !== PREVIEW_DISTRIBUTOR_ID) {
+      return null;
+    }
+    return previewSubmissions().find((item) => item.id === submissionDetail[1]) ?? null;
+  }
+  if (url.pathname === "/distributor/medicine-submissions") {
+    if (url.searchParams.get("organizationId") !== PREVIEW_DISTRIBUTOR_ID) {
+      return pageOf([], page, pageSize);
+    }
+    return pageOf(previewSubmissions(), page, pageSize);
+  }
   return null;
+}
+
+function previewSubmissions() {
+  const notice =
+    "Your medicine submission must be approved before it becomes available in the shared medicine directory and can be listed for procurement." as const;
+  const ingredient = {
+    ingredientName: "Paracetamol (mock)",
+    kind: "ACTIVE" as const,
+    strengthValue: "500",
+    strengthUnit: "MG" as const,
+    basis: null,
+    sequence: 1,
+  };
+  const pack = { description: "Strip of 10 tablets (mock)", quantity: "10", unit: "TABLET" as const };
+  return [
+    {
+      id: SUBMISSION_PENDING,
+      organizationId: PREVIEW_DISTRIBUTOR_ID,
+      status: "PENDING_REVIEW" as const,
+      displayName: "Preview Pending Tablet (mock submission)",
+      brandName: "PreviewBrand",
+      genericName: "Paracetamol",
+      dosageForm: "Tablet",
+      presentation: null,
+      manufacturerName: "Preview Labs (mock)",
+      marketerName: null,
+      indicativeUnitPrice: "18.50",
+      minimumOrderQuantity: "4",
+      stockStatus: "IN_STOCK" as const,
+      availableQuantity: "20",
+      sourceNote: "Mock counter stock",
+      reviewReason: null,
+      reviewedAt: null,
+      approvedMedicineId: null,
+      createdAt: CREATED,
+      ingredients: [ingredient],
+      packs: [pack],
+      candidates: [],
+      notice,
+    },
+    {
+      id: SUBMISSION_APPROVED,
+      organizationId: PREVIEW_DISTRIBUTOR_ID,
+      status: "APPROVED" as const,
+      displayName: "Preview Approved Capsule (mock submission)",
+      brandName: null,
+      genericName: "Amoxicillin",
+      dosageForm: "Capsule",
+      presentation: null,
+      manufacturerName: null,
+      marketerName: null,
+      indicativeUnitPrice: "42.00",
+      minimumOrderQuantity: "2",
+      stockStatus: "LOW_STOCK" as const,
+      availableQuantity: null,
+      sourceNote: null,
+      reviewReason: null,
+      reviewedAt: CREATED,
+      approvedMedicineId: PARACETAMOL_ID,
+      createdAt: CREATED,
+      ingredients: [ingredient],
+      packs: [pack],
+      candidates: [],
+      notice,
+    },
+    {
+      id: SUBMISSION_REJECTED,
+      organizationId: PREVIEW_DISTRIBUTOR_ID,
+      status: "REJECTED" as const,
+      displayName: "Preview Rejected Syrup (mock submission)",
+      brandName: null,
+      genericName: null,
+      dosageForm: "Syrup",
+      presentation: null,
+      manufacturerName: null,
+      marketerName: null,
+      indicativeUnitPrice: "10.00",
+      minimumOrderQuantity: "1",
+      stockStatus: "UNKNOWN" as const,
+      availableQuantity: null,
+      sourceNote: null,
+      reviewReason: "Mock review: this name is too close to an existing catalog medicine.",
+      reviewedAt: CREATED,
+      approvedMedicineId: null,
+      createdAt: CREATED,
+      ingredients: [ingredient],
+      packs: [pack],
+      candidates: [],
+      notice,
+    },
+  ];
 }
 
 function importSummary() {
@@ -441,6 +581,62 @@ function distributorView(enquiry: (typeof enquiries)[number]) {
     return { ...enquiry, counterpartyName: "Preview Counter Pharmacy (mock)" };
   }
   return { ...enquiry, counterpartyName: "Preview Retail Pharmacy (mock organization)" };
+}
+
+const mockContacts: Record<string, { proprietorName: string; landlineNumber: string | null; mobileNumber: string | null }> = {
+  [NORTH_ID]: {
+    proprietorName: "Mr. Manjunath (mock)",
+    landlineNumber: "+918212445566",
+    mobileNumber: "+919812345678",
+  },
+  [PREVIEW_DISTRIBUTOR_ID]: {
+    proprietorName: "Preview Proprietor (mock)",
+    landlineNumber: null,
+    mobileNumber: "+919800000001",
+  },
+};
+
+function eligibleWholesalerCount(medicineId: string): number {
+  return new Set(
+    retailerListings
+      .filter((item) => item.medicine.id === medicineId && item.id !== LISTING_OWN_AMOX)
+      .map((item) => item.distributor.id),
+  ).size;
+}
+
+function previewWholesalers(medicineId: string, url: URL, page: number, pageSize: number) {
+  const q = (url.searchParams.get("q") ?? "").trim().toLowerCase();
+  const packId = url.searchParams.get("medicinePackId");
+  const stockStatus = url.searchParams.get("stockStatus");
+  const minPrice = url.searchParams.get("minPrice");
+  const maxPrice = url.searchParams.get("maxPrice");
+  const matched = retailerListings.filter((item) => {
+    if (item.medicine.id !== medicineId || item.id === LISTING_OWN_AMOX) {
+      return false;
+    }
+    const text = `${item.distributor.name} ${item.medicine.displayName} ${item.pack.description}`.toLowerCase();
+    const price = Number(item.unitPrice);
+    return (
+      (q.length === 0 || text.includes(q)) &&
+      (!packId || item.pack.id === packId) &&
+      (!stockStatus || item.stockStatus === stockStatus) &&
+      (!minPrice || price >= Number(minPrice)) &&
+      (!maxPrice || price <= Number(maxPrice))
+    );
+  });
+  const paged = pageOf(
+    matched.map((item) => ({
+      ...item,
+      contact: mockContacts[item.distributor.id] ?? null,
+    })),
+    page,
+    pageSize,
+  );
+  return {
+    ...paged,
+    medicineId,
+    eligibleWholesalerCount: new Set(matched.map((item) => item.distributor.id)).size,
+  };
 }
 
 function filterRetailerListings(url: URL) {

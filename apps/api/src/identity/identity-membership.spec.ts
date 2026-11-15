@@ -17,6 +17,7 @@ import { DatabaseModule } from "../database/database.module.js";
 import { MembershipService } from "../membership/membership.service.js";
 import {
   DuplicateMembershipError,
+  DisabledIdentityError,
   IdentityLinkRequiredError,
   InvalidMembershipRoleError,
   InvalidMembershipTransitionError,
@@ -144,17 +145,19 @@ describe("identity and membership services", () => {
       },
     });
 
-    const user = await identityService.provision({
-      subject: "subject-disabled",
-      email: email("other-address"),
-      emailVerified: true,
-      displayName: "Disabled",
-    });
+    await expect(
+      identityService.provision({
+        subject: "subject-disabled",
+        email: email("other-address"),
+        emailVerified: true,
+        displayName: "Disabled",
+      }),
+    ).rejects.toBeInstanceOf(DisabledIdentityError);
 
-    expect(user.id).toBe(existing.id);
-    expect(user.status).toBe(UserStatus.DISABLED);
-    expect(user.email).toBe(email("disabled"));
-    expect(user.name).toBeNull();
+    const user = await prisma.user.findUnique({ where: { id: existing.id } });
+    expect(user?.status).toBe(UserStatus.DISABLED);
+    expect(user?.email).toBe(email("disabled"));
+    expect(user?.name).toBeNull();
   });
 
   it("adds one user to two organizations and rejects a duplicate membership", async () => {
@@ -492,6 +495,24 @@ describe("identity HTTP boundary", () => {
       .set("Authorization", "Bearer not-the-test-token")
       .expect(401);
     expect(apiErrorSchema.parse(invalid.body).error.code).toBe("invalid_identity");
+    await app.close();
+  });
+
+  it("rejects the same access token after the local user is disabled", async () => {
+    const app = await createHttpApp();
+    const signedIn = await request(app.getHttpServer())
+      .get("/identity/me")
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .expect(200);
+    await prisma.user.update({
+      where: { id: signedIn.body.id as string },
+      data: { status: UserStatus.DISABLED },
+    });
+    const rejected = await request(app.getHttpServer())
+      .get("/identity/me")
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .expect(403);
+    expect(apiErrorSchema.parse(rejected.body).error.code).toBe("disabled_identity");
     await app.close();
   });
 
